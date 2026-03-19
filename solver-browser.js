@@ -179,7 +179,7 @@ function epithetStatTotal(epithetName, data) {
   const e = data.epithetByName[epithetName];
   if (!e || e.reward_kind !== 'stat') return 0;
   // Trackblazer stat epithets are listed as "+N to 2 random stats", so total score is doubled.
-  return Number(e.amount || 0) * 2;
+  return Number(e.amount || 0);
 }
 
 function epithetObjectiveValue(epithetName, settings, data) {
