@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Umamusume Trackblazer Route Planner</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <div class="hero compact">
+      <h1>Umamusume Trackblazer Route Planner</h1>
+      <p>Fully static browser version for GitHub Pages. The optimizer runs in your browser and updates automatically as you change the route.</p>
+    </div>
+
+    <div class="layout">
+      <aside class="panel sidebar">
+        <h2 class="section-title">1) Uma Profile / Planner</h2>
+
+        <div class="form-group">
+          <label class="label" for="preset">Character preset</label>
+          <select id="preset"></select>
+          <div class="helper" style="margin-top:6px;">Presets set the default aptitude letters. You can still override any aptitude manually.</div>
+        </div>
+
+        <div class="form-group">
+          <div class="label">Distance aptitudes</div>
+          <div class="row-2">
+            <div><label class="label" for="sprint">Sprint</label><select id="sprint"></select></div>
+            <div><label class="label" for="mile">Mile</label><select id="mile"></select></div>
+            <div><label class="label" for="medium">Medium</label><select id="medium"></select></div>
+            <div><label class="label" for="long">Long</label><select id="long"></select></div>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <div class="label">Surface aptitudes</div>
+          <div class="row-2">
+            <div><label class="label" for="turf">Turf</label><select id="turf"></select></div>
+            <div><label class="label" for="dirt">Dirt</label><select id="dirt"></select></div>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="label" for="threshold">Minimum aptitude used by auto planner</label>
+          <select id="threshold"></select>
+        </div>
+
+        <div class="form-group">
+          <label class="label" for="maxConsec">Max races in a row</label>
+          <input id="maxConsec" type="number" min="0" step="1">
+          <div class="helper" style="margin-top:6px;">This is a hard constraint. Set it to 0 to remove the cap completely.</div>
+        </div>
+
+        <details class="advanced" open>
+          <summary>Advanced scoring</summary>
+
+          <div class="form-group" style="margin-top:10px;">
+            <label class="label" for="raceBonus">Total Race Bonus %</label>
+            <input id="raceBonus" type="number" min="0" step="1">
+            <div class="helper" style="margin-top:6px;">Used to scale post-race stats and skill points.</div>
+          </div>
+
+          <div class="row-2">
+            <div class="form-group">
+              <label class="label" for="statWeight">Stat weight</label>
+              <input id="statWeight" type="number" step="0.1">
+            </div>
+            <div class="form-group">
+              <label class="label" for="spWeight">Skill point weight</label>
+              <input id="spWeight" type="number" step="0.1">
+            </div>
+            <div class="form-group">
+              <label class="label" for="hintWeight">Hint weight</label>
+              <input id="hintWeight" type="number" step="0.1">
+            </div>
+            <div class="form-group">
+              <label class="label" for="epithetMultiplier">Epithet multiplier</label>
+              <input id="epithetMultiplier" type="number" step="0.1">
+            </div>
+            <div class="form-group">
+              <label class="label" for="threeRacePenalty">3-race streak penalty</label>
+              <input id="threeRacePenalty" type="number" step="0.1">
+            </div>
+          </div>
+
+          <div class="weight-explainer">
+            <div><strong>Stat weight</strong> = value assigned to each stat point gained from races and epithets</div>
+            <div><strong>Skill point weight</strong> = value assigned to each skill point via races</div>
+            <div><strong>Hint weight</strong> = value assigned to a +1 skill hint epithet</div>
+            <div><strong>Epithet multiplier</strong> = multiplies all epithet rewards only</div>
+            <div><strong>3-race streak penalty</strong> = score subtracted for each sliding set of three consecutive race turns</div>
+          </div>
+        </details>
+
+        <button id="rebuildBtn" class="button primary">Rebuild schedule</button>
+        <button id="clearLocksBtn" class="button secondary">Clear manual turn locks</button>
+
+        <div class="footer-note">
+          Turn control: each turn dropdown supports <strong>Auto</strong>, <strong>No race</strong>, or a specific race. When you manually change a turn, the planner keeps all earlier turns fixed and re-optimizes from that turn onward.
+        </div>
+        <div class="small-note">
+          Fresh instance rule: this static version stores nothing in localStorage or cookies. Every page load starts clean.
+        </div>
+      </aside>
+
+      <main class="panel center">
+        <div class="metric-row">
+          <div class="metric">
+            <div class="k">Completed Epithets</div>
+            <div class="v" id="metricEpithets">0</div>
+            <div class="s" id="metricEpithetsSub">earned under the current schedule</div>
+          </div>
+          <div class="metric">
+            <div class="k">Total Value</div>
+            <div class="v" id="metricValue">0</div>
+            <div class="s" id="metricValueSub">race rewards + epithet value under current weights</div>
+          </div>
+          <div class="metric">
+            <div class="k">Scheduled Races</div>
+            <div class="v" id="metricRaces">0</div>
+            <div class="s" id="metricRacesSub">selected races in the current plan</div>
+          </div>
+          <div class="metric metric-wide">
+            <div class="k">Schedule Gains</div>
+            <div class="v small" id="metricBreakdown">0 / 0 / 0 / 0</div>
+            <div class="s" id="metricBreakdownSub">race stats / race skill points / epithet stats / skill hints</div>
+          </div>
+        </div>
+
+        <div class="status-line">
+          <div id="statusPill" class="status-pill"><span>Solver</span><strong id="statusText">Loading…</strong></div>
+          <div class="status-note" id="statusNote"></div>
+        </div>
+
+        <div class="schedule-shell">
+          <div class="schedule-top">
+            <div>
+              <h2>2) Run Schedule</h2>
+              <p>Shows the current best route. Updates automatically with every setting change and can be manually edited. Every edit locks all earlier turns.</p>
+              <p class="tile-explainer">Tile value: Race + Epithet = Tile. This is meant to show the representative value of that race so you can decide whether to race or train.</p>
+            </div>
+            <div class="helper" id="summaryLine"></div>
+          </div>
+          <div class="schedule-scroll">
+            <div id="scheduleYears" class="year-sections"></div>
+          </div>
+        </div>
+      </main>
+
+      <aside class="panel epithet-panel">
+        <h3>3) Epithets from Current Schedule</h3>
+        <div id="epithetList" class="epithet-list"></div>
+      </aside>
+    </div>
+  </div>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
