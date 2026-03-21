@@ -447,9 +447,9 @@ function populateStaticControls(payload) {
   state.years = payload.years;
   state.halves = payload.halves;
   state.presetNames = Object.keys(payload.presets);
-  const initial = payload.settings?.preset || 'Custom Uma';
+  const initial = payload.settings?.preset || '';
   ids.preset.value = initial;
-  ids.presetInput.value = initial;
+  ids.presetInput.value = '';
   buildPresetDropdown('');
   const displayRanks = [...payload.ranks].reverse();
   [ids.sprint, ids.mile, ids.medium, ids.long, ids.turf, ids.dirt, ids.threshold].forEach(el => fillSelect(el, displayRanks, 'A'));
@@ -510,8 +510,9 @@ function settingsFromUI() {
 }
 
 function loadSettingsToUI(settings) {
-  ids.preset.value = settings.preset || 'Custom Uma';
-  ids.presetInput.value = settings.preset || 'Custom Uma';
+  const presetVal = settings.preset || '';
+  ids.preset.value = presetVal;
+  ids.presetInput.value = presetVal === '' ? '' : presetVal;
   ids.sprint.value = settings.aptitudes.Sprint;
   ids.mile.value = settings.aptitudes.Mile;
   ids.medium.value = settings.aptitudes.Medium;
@@ -935,7 +936,7 @@ function bindAutoSolveListeners() {
       ids.presetCombo.classList.remove('open');
       // Reset to current value if input doesn't match
       if (!state.presetNames.includes(ids.presetInput.value)) {
-        ids.presetInput.value = ids.preset.value;
+        ids.presetInput.value = ids.preset.value === '' ? '' : ids.preset.value;
       }
     }, 200);
   });
@@ -946,7 +947,7 @@ function bindAutoSolveListeners() {
       if (match) selectPreset(match);
       ids.presetInput.blur();
     } else if (e.key === 'Escape') {
-      ids.presetInput.value = ids.preset.value;
+      ids.presetInput.value = ids.preset.value === '' ? '' : ids.preset.value;
       ids.presetCombo.classList.remove('open');
       ids.presetInput.blur();
     }

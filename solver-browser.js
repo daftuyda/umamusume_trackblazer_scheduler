@@ -24,7 +24,6 @@ const NO_RACE = '[No race]';
 const AUTO = 'Auto';
 
 const PRESETS = {
-  'Custom Uma': { Sprint: 'A', Mile: 'A', Medium: 'A', Long: 'A', Turf: 'A', Dirt: 'G' },
   'Special Week': { Sprint: 'F', Mile: 'C', Medium: 'A', Long: 'A', Turf: 'A', Dirt: 'G' },
   'Silence Suzuka': { Sprint: 'D', Mile: 'A', Medium: 'A', Long: 'E', Turf: 'A', Dirt: 'G' },
   'Tokai Teio': { Sprint: 'F', Mile: 'E', Medium: 'A', Long: 'B', Turf: 'A', Dirt: 'G' },
@@ -203,8 +202,8 @@ async function loadData() {
 
 function defaultSettings() {
   return {
-    preset: 'Custom Uma',
-    aptitudes: clone(PRESETS['Custom Uma']),
+    preset: '',
+    aptitudes: { Sprint: 'A', Mile: 'A', Medium: 'A', Long: 'A', Turf: 'A', Dirt: 'G' },
     threshold: 'C',
     race_bonus_pct: 50.0,
     stat_weight: 1.0,
@@ -217,7 +216,7 @@ function defaultSettings() {
 }
 
 function applyPreset(presetName) {
-  return clone(PRESETS[presetName] || PRESETS['Custom Uma']);
+  return clone(PRESETS[presetName] || { Sprint: 'A', Mile: 'A', Medium: 'A', Long: 'A', Turf: 'A', Dirt: 'G' });
 }
 
 function normalizeSettings(settings = null) {
