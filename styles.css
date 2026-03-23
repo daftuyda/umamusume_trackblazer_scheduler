@@ -780,3 +780,54 @@ details.advanced[open] summary::before { transform: rotate(90deg); }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--stroke); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+
+/* ═══════════════════════════════════════════════════
+   FORCED EPITHETS
+   ═══════════════════════════════════════════════════ */
+.forced-epithet-list {
+  max-height: 260px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.forced-epithet-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--text);
+  transition: background 0.15s;
+}
+.forced-epithet-item:hover {
+  background: var(--panel-3);
+}
+.forced-epithet-item.active {
+  background: var(--accent);
+  color: var(--green-text);
+  font-weight: 600;
+}
+.forced-epithet-item input[type="checkbox"] {
+  accent-color: var(--accent-dark);
+  flex-shrink: 0;
+}
+.forced-epithet-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.forced-epithet-reward {
+  font-size: 10px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.forced-epithet-item.active .forced-epithet-reward {
+  color: var(--green-text);
+  opacity: 0.7;
+}

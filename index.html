@@ -68,6 +68,15 @@
         <div class="helper" style="margin-top:4px;">Hard constraint. 0 = no cap.</div>
       </div>
 
+      <details class="advanced" id="forcedEpithetsSection">
+        <summary>Forced Epithets</summary>
+        <div class="helper" style="margin-top:4px;margin-bottom:8px;">Force the solver to achieve selected epithets. The solver will return infeasible if impossible with current aptitudes.</div>
+        <div class="forced-epithet-search-wrap">
+          <input type="text" id="forcedEpithetSearch" class="combo-input" placeholder="Filter epithets..." style="margin-bottom:6px;">
+        </div>
+        <div id="forcedEpithetList" class="forced-epithet-list"></div>
+      </details>
+
       <details class="advanced" open>
         <summary>Advanced scoring</summary>
         <div class="form-group" style="margin-top:8px;">

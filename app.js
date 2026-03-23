@@ -1,4 +1,4 @@
-import { initialPayload, solveWithManualLocks, applyPreset, DEFAULT_SUMMER_BLOCKS, epithetRacePredicates } from './solver-browser.js';
+import { initialPayload, solveWithManualLocks, applyPreset, DEFAULT_SUMMER_BLOCKS, epithetRacePredicates, getAllEpithetNames } from './solver-browser.js';
 
 let state = {
   settings: null,
@@ -12,7 +12,9 @@ let state = {
   presets: {},
   months: [],
   years: [],
-  halves: []
+  halves: [],
+  forced_epithets: [],
+  all_epithet_defs: []
 };
 
 let autoSolveTimer = null;
@@ -122,8 +124,11 @@ function showToast(msg) {
 }
 
 function encodeShareState() {
+  const s = settingsFromUI();
+  // Only include forced_epithets if non-empty to keep share codes compact
+  if (!s.forced_epithets || !s.forced_epithets.length) delete s.forced_epithets;
   const data = {
-    s: settingsFromUI(),
+    s,
     l: state.manual_locks,
     f: state.freeze_before_index
   };
@@ -507,7 +512,8 @@ function settingsFromUI() {
     hint_weight: Number(ids.hintWeight.value || 0),
     epithet_multiplier: Number(ids.epithetMultiplier.value || 0),
     three_race_penalty_weight: Number(ids.threeRacePenalty.value || 0),
-    race_cost: Number(ids.raceCost.value || 0)
+    race_cost: Number(ids.raceCost.value || 0),
+    forced_epithets: [...state.forced_epithets]
   };
 }
 
@@ -530,6 +536,10 @@ function loadSettingsToUI(settings) {
   ids.epithetMultiplier.value = settings.epithet_multiplier;
   ids.threeRacePenalty.value = settings.three_race_penalty_weight;
   ids.raceCost.value = settings.race_cost;
+  if (settings.forced_epithets) {
+    state.forced_epithets = [...settings.forced_epithets];
+    renderForcedEpithetList();
+  }
 }
 
 function currentFreezeLabel() {
@@ -608,6 +618,58 @@ function abbreviateRace(name) {
       .replace('Queen Elizabeth II Cup', 'QE II Cup');
   }
   return name;
+}
+
+/* ───── FORCED EPITHETS ───── */
+const forcedEpithetList = document.getElementById('forcedEpithetList');
+const forcedEpithetSearch = document.getElementById('forcedEpithetSearch');
+
+function renderForcedEpithetList(filter = '') {
+  if (!forcedEpithetList) return;
+  forcedEpithetList.innerHTML = '';
+  const lower = filter.toLowerCase();
+  const defs = state.all_epithet_defs || [];
+  const filtered = lower ? defs.filter(e => e.name.toLowerCase().includes(lower) || e.condition_text.toLowerCase().includes(lower)) : defs;
+  // Show forced ones first, then the rest
+  const sorted = [...filtered].sort((a, b) => {
+    const af = state.forced_epithets.includes(a.name) ? 0 : 1;
+    const bf = state.forced_epithets.includes(b.name) ? 0 : 1;
+    return af - bf || a.name.localeCompare(b.name);
+  });
+  for (const ep of sorted) {
+    const isForced = state.forced_epithets.includes(ep.name);
+    const item = document.createElement('label');
+    item.className = 'forced-epithet-item' + (isForced ? ' active' : '');
+    item.title = ep.condition_text;
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = isForced;
+    cb.addEventListener('change', () => {
+      if (cb.checked) {
+        if (!state.forced_epithets.includes(ep.name)) state.forced_epithets.push(ep.name);
+      } else {
+        state.forced_epithets = state.forced_epithets.filter(n => n !== ep.name);
+      }
+      item.classList.toggle('active', cb.checked);
+      queueSolve(0);
+    });
+    const text = document.createElement('span');
+    text.className = 'forced-epithet-name';
+    text.textContent = ep.name;
+    const reward = document.createElement('span');
+    reward.className = 'forced-epithet-reward';
+    reward.textContent = ep.reward_text;
+    item.appendChild(cb);
+    item.appendChild(text);
+    item.appendChild(reward);
+    forcedEpithetList.appendChild(item);
+  }
+}
+
+if (forcedEpithetSearch) {
+  forcedEpithetSearch.addEventListener('input', () => {
+    renderForcedEpithetList(forcedEpithetSearch.value);
+  });
 }
 
 /* ───── RENDER: TURN CELL ───── */
@@ -1012,8 +1074,10 @@ async function init() {
   const hash = window.location.hash.slice(1);
   const saved = !hash ? loadStateFromStorage() : null;
 
-  const payload = await initialPayload();
+  const [payload, allEpDefs] = await Promise.all([initialPayload(), getAllEpithetNames()]);
+  state.all_epithet_defs = allEpDefs;
   populateStaticControls(payload);
+  renderForcedEpithetList();
 
   // Apply initial payload without saving to storage (would overwrite saved state)
   state.settings = payload.settings;

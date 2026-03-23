@@ -212,7 +212,8 @@ function defaultSettings() {
     epithet_multiplier: 1.0,
     three_race_penalty_weight: 10.0,
     max_consecutive_races: 3,
-    race_cost: 100
+    race_cost: 100,
+    forced_epithets: []
   };
 }
 
@@ -802,6 +803,14 @@ async function optimizeSchedule(settingsInput = null, fixedChoices = {}) {
   requireYLeqExpr('Turf Tussler', actionSum(r => r.surface === 'Turf' && r.distance === 'Medium'));
   requireYLeqExpr('Turf Tussler', actionSum(r => r.surface === 'Turf' && r.distance === 'Long'));
 
+  // Force selected epithets (hard constraint: y = 1).
+  for (const epName of (settings.forced_epithets || [])) {
+    const yVar = `y_${epName}`;
+    if (yVars.includes(yVar)) {
+      addConstraint(model, glpk, `force_${epName}`, [[yVar, 1]], glpk.GLP_FX, 1, 1);
+    }
+  }
+
   const result = await glpk.solve(model, {
     msglev: glpk.GLP_MSG_OFF,
     presol: true
@@ -1049,6 +1058,11 @@ export async function initialPayload() {
   await loadData();
   const result = await optimizeSchedule(defaultSettings(), {});
   return formatPayload(result, {}, result.selected_choices || []);
+}
+
+export async function getAllEpithetNames() {
+  const data = await loadData();
+  return data.epithets.map(e => ({ name: e.name, reward_text: e.reward_text, condition_text: e.condition_text }));
 }
 
 export { NO_RACE, AUTO, applyPreset, DEFAULT_SUMMER_BLOCKS, BASE_REWARD, epithetRacePredicates };
