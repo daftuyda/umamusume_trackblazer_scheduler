@@ -15,6 +15,12 @@ const WEST_TRACKS = new Set(['Chukyo', 'Chukyu', 'Hanshin', 'Kyoto']);
 const TOHOKU_TRACKS = new Set(['Fukushima', 'Niigata']);
 const HOKKAIDO_TRACKS = new Set(['Sapporo', 'Hakodate']);
 const KOKURA_TRACKS = new Set(['Kokura']);
+
+const STANDARD_LENGTHS = new Set([1200, 1600, 2000, 2400]);
+function isStandardDistance(race) {
+  return STANDARD_LENGTHS.has(race.length);
+}
+
 const BASE_REWARD = {
   G1: { stats: 10, sp: 35 },
   G2: { stats: 8, sp: 25 },
@@ -305,8 +311,8 @@ function selectedCounts(selectedRaces) {
   return {
     byName,
     byYearName,
-    standard: countSelected(selectedRaces, r => r.distance === 'Medium'),
-    nonstandard: countSelected(selectedRaces, r => r.distance !== 'Medium'),
+    standard: countSelected(selectedRaces, r => isStandardDistance(r)),
+    nonstandard: countSelected(selectedRaces, r => !isStandardDistance(r)),
     dirt: countSelected(selectedRaces, r => r.surface === 'Dirt'),
     dirt_g1: countSelected(selectedRaces, r => r.surface === 'Dirt' && r.grade === 'G1'),
     op_plus: countSelected(selectedRaces, r => ['G1', 'G2', 'G3', 'OP', 'Pre-OP'].includes(r.grade)),
@@ -447,8 +453,8 @@ function epithetRacePredicates(completedNames) {
     }
   }
 
-  if (has('Standard Distance Leader')) preds['Standard Distance Leader'] = r => r.distance === 'Medium';
-  if (has('Non-Standard Distance Leader')) preds['Non-Standard Distance Leader'] = r => r.distance !== 'Medium';
+  if (has('Standard Distance Leader')) preds['Standard Distance Leader'] = r => isStandardDistance(r);
+  if (has('Non-Standard Distance Leader')) preds['Non-Standard Distance Leader'] = r => !isStandardDistance(r);
   if (has('Eat My Dust')) preds['Eat My Dust'] = r => r.surface === 'Dirt';
   else if (has('Playing Dirty')) preds['Playing Dirty'] = r => r.surface === 'Dirt';
   else if (has('Dirty Work')) preds['Dirty Work'] = r => r.surface === 'Dirt';
@@ -743,8 +749,8 @@ async function optimizeSchedule(settingsInput = null, fixedChoices = {}) {
 
   const exprDirtG1 = actionSum(r => r.surface === 'Dirt' && r.grade === 'G1');
   const exprDirt = actionSum(r => r.surface === 'Dirt');
-  const exprStandard = actionSum(r => r.distance === 'Medium');
-  const exprNonStandard = actionSum(r => r.distance !== 'Medium');
+  const exprStandard = actionSum(r => isStandardDistance(r));
+  const exprNonStandard = actionSum(r => !isStandardDistance(r));
   const exprOpPlus = actionSum(r => ['G1', 'G2', 'G3', 'OP', 'Pre-OP'].includes(r.grade));
   const exprJuniorStakes = actionSum(r => String(r.name).includes('Junior Stakes'));
   const exprCountry = actionSum(r => COUNTRY_WORDS.some(word => String(r.name).includes(word)));
