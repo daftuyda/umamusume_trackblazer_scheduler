@@ -1004,8 +1004,24 @@ export async function solveWithManualLocks(settingsInput, currentSelected = [], 
     }
   }
   fixed = { ...fixed, ...locks };
-  const result = await optimizeSchedule(settings, fixed);
-  return formatPayload(result, manualLocks, result.selected_choices || []);
+  let result = await optimizeSchedule(settings, fixed);
+
+  // If infeasible and forced epithets are active, retry without them
+  let droppedEpithets = [];
+  if (!['OPTIMAL', 'FEASIBLE'].includes(result.status) && settings.forced_epithets?.length) {
+    const allForced = [...settings.forced_epithets];
+    const relaxed = { ...settings, forced_epithets: [] };
+    result = await optimizeSchedule(relaxed, fixed);
+    if (['OPTIMAL', 'FEASIBLE'].includes(result.status)) {
+      // Figure out which forced epithets couldn't be completed
+      const completed = new Set(result.epithets || []);
+      droppedEpithets = allForced.filter(name => !completed.has(name));
+    }
+  }
+
+  const payload = formatPayload(result, manualLocks, result.selected_choices || []);
+  if (droppedEpithets.length) payload.dropped_epithets = droppedEpithets;
+  return payload;
 }
 
 function allDropdownChoices(windows, settings) {

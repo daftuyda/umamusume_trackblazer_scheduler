@@ -1000,9 +1000,6 @@ function queueSolve(delay = 250) {
 
 async function postSolve() {
   const seq = ++solveSequence;
-  // Snapshot state before solve so we can roll back on infeasible results
-  const prevLocks = { ...state.manual_locks };
-  const prevFreeze = state.freeze_before_index;
   ids.statusText.textContent = 'UPDATING';
   ids.statusPill.className = 'status-pill warn';
   ids.statusNote.textContent = 'Recomputing\u2026';
@@ -1011,18 +1008,12 @@ async function postSolve() {
       settingsFromUI(), state.current_selected, state.manual_locks, state.freeze_before_index
     );
     if (seq !== solveSequence) return;
-    const status = payload.summary?.status;
-    if (status && !['OPTIMAL', 'FEASIBLE'].includes(status)) {
-      // Roll back locks/freeze so the UI stays consistent with displayed schedule
-      state.manual_locks = prevLocks;
-      state.freeze_before_index = prevFreeze;
-      ids.statusText.textContent = 'ERROR';
-      ids.statusPill.className = 'status-pill bad';
-      ids.statusNote.textContent = payload.summary?.message
-        || `No feasible schedule — check forced epithets and locked races for conflicts.`;
-      return;
-    }
     applyPayload(payload);
+    if (payload.dropped_epithets?.length) {
+      state.forced_epithets = state.forced_epithets.filter(n => !payload.dropped_epithets.includes(n));
+      renderForcedEpithetList();
+      showToast(`Removed forced epithet${payload.dropped_epithets.length > 1 ? 's' : ''} (incompatible with locked races): ${payload.dropped_epithets.join(', ')}`);
+    }
   } catch (err) {
     if (seq !== solveSequence) return;
     console.error(err);
