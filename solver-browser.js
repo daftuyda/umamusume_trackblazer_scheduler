@@ -216,10 +216,11 @@ function defaultSettings() {
     sp_weight: 1.0,
     hint_weight: 8.0,
     epithet_multiplier: 1.0,
-    three_race_penalty_weight: 10.0,
-    max_consecutive_races: 3,
+    three_race_penalty_weight: 3.0,
+    max_consecutive_races: 0,
     race_cost: 100,
-    forced_epithets: []
+    forced_epithets: [],
+    forced_climax: ''
   };
 }
 
@@ -601,10 +602,15 @@ async function optimizeSchedule(settingsInput = null, fixedChoices = {}) {
     ? g2g3Baseline(settings) * 3
     : 0;
 
+  // Tiny tiebreaker: among solutions with equal primary value, prefer more races.
+  // Scaled small enough (0.001) to never override a real scoring difference.
+  const RACE_TIEBREAK_EPSILON = 0.001;
+
   const objectiveVars = [];
   for (const name of xVars) {
     const info = actionLookup.get(name);
     let coef = info.value;
+    if (info.race) coef += RACE_TIEBREAK_EPSILON;
     // Apply summer penalty to race actions in softened summer windows
     if (summerPenalty > 0 && softenedSummerWindows.has(info.window) && info.race) {
       coef -= summerPenalty;
@@ -844,6 +850,36 @@ async function optimizeSchedule(settingsInput = null, fixedChoices = {}) {
     }
   }
 
+  // Force climax type: plurality — the chosen type must have strictly more races
+  // than every other competing type. For distance climaxes the rivals are the
+  // other 3 distances; for Dirt the rival is Turf.
+  // Per rival: count(chosen) - count(rival) >= 1
+  const climax = settings.forced_climax || '';
+  if (climax) {
+    const isDirt = climax === 'Dirt';
+    const rivals = isDirt
+      ? ['Turf']
+      : ['Sprint', 'Mile', 'Medium', 'Long'].filter(d => d !== climax);
+    for (const rival of rivals) {
+      const matchChosen = isDirt
+        ? r => r.surface === 'Dirt'
+        : r => r.distance === climax;
+      const matchRival = isDirt
+        ? r => r.surface === 'Turf'
+        : r => r.distance === rival;
+      const coeffs = [];
+      for (const [varName, info] of actionLookup.entries()) {
+        if (info.race) {
+          const c = (matchChosen(info.race) ? 1 : 0) - (matchRival(info.race) ? 1 : 0);
+          if (c !== 0) coeffs.push([varName, c]);
+        }
+      }
+      if (coeffs.length) {
+        addConstraint(model, glpk, `climax_vs_${rival}`, coeffs, glpk.GLP_LO, 1, 0);
+      }
+    }
+  }
+
   const result = await glpk.solve(model, {
     msglev: glpk.GLP_MSG_OFF,
     presol: true
@@ -949,14 +985,21 @@ async function optimizeSchedule(settingsInput = null, fixedChoices = {}) {
   const totalRaceSp = chosenActions.reduce((sum, chosen) => sum + chosen.sp, 0);
   const epithetStatPoints = solvedEpithets.reduce((sum, name) => sum + epithetStatTotal(name, data), 0);
   const epithetHintNames = solvedEpithets.filter(name => data.epithetByName[name].reward_kind === 'hint').map(name => hintSkillName(name, data));
-  const weightedRaceValueTotal = settings.stat_weight * totalRaceStats + settings.sp_weight * totalRaceSp;
+  const weightedRaceValueGross = settings.stat_weight * totalRaceStats + settings.sp_weight * totalRaceSp;
+  const raceCostPerRace = Number(settings.race_cost || 0) / 100.0 * g2g3Baseline(settings);
+  const raceCostTotal = raceCostPerRace * selectedRaces.length;
+  const summerPenaltyCount = chosenActions.reduce((sum, chosen, idx) => (
+    sum + ((chosen.race && softenedSummerWindows.has(idx)) ? 1 : 0)
+  ), 0);
+  const summerPenaltyTotal = summerPenalty * summerPenaltyCount;
+  const weightedRaceValueNet = weightedRaceValueGross - raceCostTotal - summerPenaltyTotal;
   const weightedEpithetValueTotal = settings.epithet_multiplier * settings.stat_weight * epithetStatPoints + settings.epithet_multiplier * settings.hint_weight * epithetHintNames.length;
   const triplePenaltyCount = zVars.reduce((sum, zName, idx) => {
     if (LATE_DEC_WINDOWS.has(idx + 2)) return sum;
     return sum + ((solutionVars[zName] || 0) > 0.5 ? 1 : 0);
   }, 0);
   const triplePenaltyTotal = settings.three_race_penalty_weight * triplePenaltyCount;
-  const totalValue = weightedRaceValueTotal + weightedEpithetValueTotal - triplePenaltyTotal;
+  const totalValue = weightedRaceValueNet + weightedEpithetValueTotal - triplePenaltyTotal;
 
   return {
     status,
@@ -965,8 +1008,12 @@ async function optimizeSchedule(settingsInput = null, fixedChoices = {}) {
     epithets: solvedEpithets,
     selected_choices: scheduleRows.map(row => row.selected),
     total_value: Number(totalValue.toFixed(2)),
-    weighted_race_value: Number(weightedRaceValueTotal.toFixed(2)),
+    weighted_race_value: Number(weightedRaceValueGross.toFixed(2)),
+    weighted_race_value_net: Number(weightedRaceValueNet.toFixed(2)),
     weighted_epithet_value: Number(weightedEpithetValueTotal.toFixed(2)),
+    race_cost_total: Number(raceCostTotal.toFixed(2)),
+    summer_penalty_count: summerPenaltyCount,
+    summer_penalty_total: Number(summerPenaltyTotal.toFixed(2)),
     triple_penalty_count: triplePenaltyCount,
     triple_penalty_total: Number(triplePenaltyTotal.toFixed(2)),
     total_race_stats: totalRaceStats,
@@ -1006,21 +1053,33 @@ export async function solveWithManualLocks(settingsInput, currentSelected = [], 
   fixed = { ...fixed, ...locks };
   let result = await optimizeSchedule(settings, fixed);
 
-  // If infeasible and forced epithets are active, retry without them
+  // If infeasible and forced epithets/climax are active, retry without them
   let droppedEpithets = [];
+  let droppedClimax = false;
   if (!['OPTIMAL', 'FEASIBLE'].includes(result.status) && settings.forced_epithets?.length) {
     const allForced = [...settings.forced_epithets];
     const relaxed = { ...settings, forced_epithets: [] };
     result = await optimizeSchedule(relaxed, fixed);
     if (['OPTIMAL', 'FEASIBLE'].includes(result.status)) {
-      // Figure out which forced epithets couldn't be completed
       const completed = new Set(result.epithets || []);
       droppedEpithets = allForced.filter(name => !completed.has(name));
+    }
+  }
+  if (!['OPTIMAL', 'FEASIBLE'].includes(result.status) && settings.forced_climax) {
+    const relaxed = { ...settings, forced_epithets: [], forced_climax: '' };
+    result = await optimizeSchedule(relaxed, fixed);
+    if (['OPTIMAL', 'FEASIBLE'].includes(result.status)) {
+      droppedClimax = true;
+      if (settings.forced_epithets?.length) {
+        const completed = new Set(result.epithets || []);
+        droppedEpithets = settings.forced_epithets.filter(name => !completed.has(name));
+      }
     }
   }
 
   const payload = formatPayload(result, manualLocks, result.selected_choices || []);
   if (droppedEpithets.length) payload.dropped_epithets = droppedEpithets;
+  if (droppedClimax) payload.dropped_climax = true;
   return payload;
 }
 
@@ -1080,7 +1139,11 @@ function formatPayload(result, manualLocks = {}, currentSelected = []) {
       message: result.message || '',
       total_value: result.total_value || 0,
       weighted_race_value: result.weighted_race_value || 0,
+      weighted_race_value_net: result.weighted_race_value_net || 0,
       weighted_epithet_value: result.weighted_epithet_value || 0,
+      race_cost_total: result.race_cost_total || 0,
+      summer_penalty_count: result.summer_penalty_count || 0,
+      summer_penalty_total: result.summer_penalty_total || 0,
       triple_penalty_count: result.triple_penalty_count || 0,
       triple_penalty_total: result.triple_penalty_total || 0,
       race_stats: result.total_race_stats || 0,

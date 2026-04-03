@@ -33,6 +33,7 @@ const ids = {
   dirt: document.getElementById('dirt'),
   threshold: document.getElementById('threshold'),
   maxConsec: document.getElementById('maxConsec'),
+  forcedClimax: document.getElementById('forcedClimax'),
   raceBonus: document.getElementById('raceBonus'),
   statWeight: document.getElementById('statWeight'),
   spWeight: document.getElementById('spWeight'),
@@ -125,8 +126,9 @@ function showToast(msg) {
 
 function encodeShareState() {
   const s = settingsFromUI();
-  // Only include forced_epithets if non-empty to keep share codes compact
+  // Only include forced_epithets/forced_climax if non-empty to keep share codes compact
   if (!s.forced_epithets || !s.forced_epithets.length) delete s.forced_epithets;
+  if (!s.forced_climax) delete s.forced_climax;
   const data = {
     s,
     l: state.manual_locks,
@@ -294,12 +296,14 @@ function showTooltip(card, w) {
     const raceList = document.createElement('div');
     raceList.className = 'tt-race-list';
 
-    // Auto option
-    const autoItem = document.createElement('div');
-    autoItem.className = `tt-race-item ${w.lock_value === 'Auto' || !w.lock_value ? 'selected' : ''}`;
-    autoItem.innerHTML = `<span class="tt-ri-name">Auto (solver picks)</span>`;
-    autoItem.addEventListener('click', () => pickRace('Auto', w));
-    raceList.appendChild(autoItem);
+    // Auto option (only shown when solver is enabled)
+    if (solverEnabled) {
+      const autoItem = document.createElement('div');
+      autoItem.className = `tt-race-item ${w.lock_value === 'Auto' || !w.lock_value ? 'selected' : ''}`;
+      autoItem.innerHTML = `<span class="tt-ri-name">Auto (solver picks)</span>`;
+      autoItem.addEventListener('click', () => pickRace('Auto', w));
+      raceList.appendChild(autoItem);
+    }
 
     // No race option
     const noRaceItem = document.createElement('div');
@@ -349,9 +353,9 @@ function showTooltip(card, w) {
     skipBtn.className = 'tt-btn tt-btn-skip';
     skipBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6L6 18"/><path d="M6 6l12 12"/></svg> Skip — Train`;
     skipBtn.addEventListener('click', () => {
-      lockUpTo(w.index);
+      if (solverEnabled) lockUpTo(w.index);
       state.manual_locks[String(w.index)] = '[No race]';
-      state.freeze_before_index = w.index;
+      if (solverEnabled) state.freeze_before_index = w.index;
       hideTooltip();
       queueSolve(0);
     });
@@ -363,9 +367,9 @@ function showTooltip(card, w) {
       lostBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v10"/><path d="M9 5l3-3 3 3"/><circle cx="12" cy="19" r="3"/></svg> Lost — Retry`;
       lostBtn.title = 'Didn\'t get 1st? Lock this turn as training so the solver replans the race for a later turn.';
       lostBtn.addEventListener('click', () => {
-        lockUpTo(w.index);
+        if (solverEnabled) lockUpTo(w.index);
         state.manual_locks[String(w.index)] = '[No race]';
-        state.freeze_before_index = w.index;
+        if (solverEnabled) state.freeze_before_index = w.index;
         hideTooltip();
         queueSolve(0);
       });
@@ -375,8 +379,8 @@ function showTooltip(card, w) {
       confirmBtn.className = 'tt-btn tt-btn-confirm';
       confirmBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg> Confirm Race`;
       confirmBtn.addEventListener('click', () => {
-        lockUpTo(w.index);
-        state.freeze_before_index = w.index;
+        if (solverEnabled) lockUpTo(w.index);
+        if (solverEnabled) state.freeze_before_index = w.index;
         hideTooltip();
         queueSolve(0);
       });
@@ -546,7 +550,8 @@ function settingsFromUI() {
     epithet_multiplier: Number(ids.epithetMultiplier.value || 0),
     three_race_penalty_weight: Number(ids.threeRacePenalty.value || 0),
     race_cost: Number(ids.raceCost.value || 0),
-    forced_epithets: [...state.forced_epithets]
+    forced_epithets: [...state.forced_epithets],
+    forced_climax: ids.forcedClimax.value || ''
   };
 }
 
@@ -561,7 +566,7 @@ function loadSettingsToUI(settings) {
   ids.turf.value = settings.aptitudes.Turf;
   ids.dirt.value = settings.aptitudes.Dirt;
   ids.threshold.value = settings.threshold;
-  ids.maxConsec.value = settings.max_consecutive_races;
+  ids.maxConsec.value = settings.max_consecutive_races || '';
   ids.raceBonus.value = settings.race_bonus_pct;
   ids.statWeight.value = settings.stat_weight;
   ids.spWeight.value = settings.sp_weight;
@@ -569,6 +574,7 @@ function loadSettingsToUI(settings) {
   ids.epithetMultiplier.value = settings.epithet_multiplier;
   ids.threeRacePenalty.value = settings.three_race_penalty_weight;
   ids.raceCost.value = settings.race_cost;
+  ids.forcedClimax.value = settings.forced_climax || '';
   if (settings.forced_epithets) {
     state.forced_epithets = [...settings.forced_epithets];
     renderForcedEpithetList();
@@ -936,6 +942,20 @@ function renderSummary() {
   const hintNames = s.epithet_hint_names || [];
   if (elHints) elHints.textContent = hintNames.length ? hintNames.length : '0';
   if (elHints) elHints.title = hintNames.length ? hintNames.join(', ') : 'No hints';
+  const grossRaceValue = Number(s.weighted_race_value || 0);
+  const netRaceValue = Number(s.weighted_race_value_net ?? grossRaceValue);
+  const raceCostTotal = Number(s.race_cost_total || 0);
+  const summerPenaltyTotal = Number(s.summer_penalty_total || 0);
+  const triplePenaltyTotal = Number(s.triple_penalty_total || 0);
+  ids.metricValue.title = [
+    `Race value ${grossRaceValue}`,
+    raceCostTotal ? `- race cost ${raceCostTotal}` : '',
+    summerPenaltyTotal ? `- summer penalty ${summerPenaltyTotal}` : '',
+    `= ${netRaceValue}`,
+    `+ epithet value ${Number(s.weighted_epithet_value || 0)}`,
+    triplePenaltyTotal ? `- 3-race penalty ${triplePenaltyTotal}` : '',
+    `= ${Number(s.total_value || 0)}`
+  ].filter(Boolean).join(' ');
 
   // Keep hidden compat elements populated
   if (ids.metricBreakdown) ids.metricBreakdown.innerHTML = `${s.race_stats}/${s.race_skill_points}/${s.epithet_stat_points}`;
@@ -947,6 +967,9 @@ function renderSummary() {
     ? 'Solver-proven optimal for current settings.'
     : 'Not proven optimal — check solver status.';
   if (s.message) note += ' ' + s.message;
+  if (Number(state.settings?.max_consecutive_races || 0) <= 0 && Number(state.settings?.three_race_penalty_weight || 0) > 0) {
+    note += ' No hard cap is active; the 3-race penalty still applies.';
+  }
   ids.statusNote.textContent = note;
 
   const freeze = currentFreezeLabel();
@@ -991,11 +1014,48 @@ function loadStateFromStorage() {
 function queueSolve(delay = 250) {
   clearTimeout(autoSolveTimer);
   if (!solverEnabled) {
-    // Solver disabled — just re-render with current state
+    // Solver disabled — apply manual locks directly to window state and re-render
+    applyManualLocksToWindows();
     renderSchedule();
+    renderSummary();
+    saveStateToStorage();
     return;
   }
   autoSolveTimer = setTimeout(() => postSolve(), delay);
+}
+
+function applyManualLocksToWindows() {
+  for (const w of state.windows) {
+    const lock = state.manual_locks[String(w.index)];
+    if (!lock || lock === 'Auto') continue;
+    if (lock === '[No race]') {
+      w.selected = '[No race]';
+      w.grade = '';
+      w.track = '';
+      w.surface = '';
+      w.distance = '';
+      w.race_stats = 0;
+      w.race_sp = 0;
+      w.lock_value = '[No race]';
+    } else {
+      const rc = (w.race_choices || []).find(r => r.name === lock);
+      w.selected = lock;
+      w.grade = rc ? rc.grade : w.grade;
+      w.track = rc ? rc.track : w.track;
+      w.surface = rc ? rc.surface : w.surface;
+      w.distance = rc ? rc.distance : w.distance;
+      w.race_stats = rc ? rc.stats : w.race_stats;
+      w.race_sp = rc ? rc.sp : w.race_sp;
+      w.lock_value = lock;
+    }
+  }
+  // Update current_selected and summary race count
+  state.current_selected = state.windows.map(w => w.selected);
+  if (state.summary) {
+    state.summary.scheduled_races = state.current_selected.filter(s => s !== '[No race]').length;
+    state.summary.race_stats = state.windows.reduce((sum, w) => sum + (w.race_stats || 0), 0);
+    state.summary.race_skill_points = state.windows.reduce((sum, w) => sum + (w.race_sp || 0), 0);
+  }
 }
 
 async function postSolve() {
@@ -1013,6 +1073,10 @@ async function postSolve() {
       state.forced_epithets = state.forced_epithets.filter(n => !payload.dropped_epithets.includes(n));
       renderForcedEpithetList();
       showToast(`Removed forced epithet${payload.dropped_epithets.length > 1 ? 's' : ''} (incompatible with locked races): ${payload.dropped_epithets.join(', ')}`);
+    }
+    if (payload.dropped_climax) {
+      ids.forcedClimax.value = '';
+      showToast('Removed forced TS Climax (incompatible with current constraints)');
     }
   } catch (err) {
     if (seq !== solveSequence) return;
@@ -1071,6 +1135,7 @@ function bindAutoSolveListeners() {
   });
 
   ids.maxConsec.addEventListener('change', () => queueSolve(0));
+  ids.forcedClimax.addEventListener('change', () => queueSolve(0));
 
   [ids.raceBonus, ids.statWeight, ids.spWeight, ids.hintWeight, ids.epithetMultiplier, ids.threeRacePenalty, ids.raceCost].forEach(el => {
     el.addEventListener('input', () => queueSolve(250));

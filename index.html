@@ -64,8 +64,21 @@
 
       <div class="form-group">
         <label class="label" for="maxConsec">Max races in a row</label>
-        <input id="maxConsec" type="number" min="0" step="1">
-        <div class="helper" style="margin-top:4px;">Hard constraint. 0 = no cap.</div>
+        <input id="maxConsec" type="number" min="0" step="1" placeholder="No limit">
+        <div class="helper" style="margin-top:4px;">Hard cap on consecutive races. Leave empty or 0 for no limit.</div>
+      </div>
+
+      <div class="form-group">
+        <label class="label" for="forcedClimax">Force TS Climax</label>
+        <select id="forcedClimax">
+          <option value="">None</option>
+          <option value="Sprint">Sprint</option>
+          <option value="Mile">Mile</option>
+          <option value="Medium">Medium (Classic)</option>
+          <option value="Long">Long (Spring)</option>
+          <option value="Dirt">Dirt</option>
+        </select>
+        <div class="helper" style="margin-top:4px;">Force the majority of races to be a specific type to guarantee that TS Climax.</div>
       </div>
 
       <details class="advanced" id="forcedEpithetsSection">
