@@ -349,7 +349,7 @@ function completedEpithets(selectedRaces, data) {
 
   const stunning = ['Satsuki Sho', 'Japanese Derby (Tokyo Yushun)', 'Kikuka Sho'].every(n => hasRaceYear(counts, 'Classic', n));
   const lady = ['Oka Sho', 'Japanese Oaks', 'Shuka Sho'].every(n => hasRaceYear(counts, 'Classic', n));
-  const springChampion = ['Osaka Hai', 'Tenno Sho (Spring)', 'Takarazuka Kinen'].every(n => hasRaceYear(counts, 'Senior', n));
+  const springChampion = hasRaceYear(counts, 'Senior', 'Osaka Hai') && hasRaceYear(counts, 'Senior', 'Tenno Sho (Spring)') && hasRaceAny(counts, 'Takarazuka Kinen');
   const fallChampion = ['Tenno Sho (Autumn)', 'Japan Cup', 'Arima Kinen'].every(n => hasRaceYear(counts, 'Senior', n));
 
   if (stunning) done.add('Stunning');
@@ -422,7 +422,7 @@ function epithetRacePredicates(completedNames) {
 
   if (has('Stunning')) preds['Stunning'] = r => r.year === 'Classic' && ['Satsuki Sho', 'Japanese Derby (Tokyo Yushun)', 'Kikuka Sho'].includes(r.name);
   if (has('Lady')) preds['Lady'] = r => r.year === 'Classic' && ['Oka Sho', 'Japanese Oaks', 'Shuka Sho'].includes(r.name);
-  if (has('Spring Champion')) preds['Spring Champion'] = r => r.year === 'Senior' && ['Osaka Hai', 'Tenno Sho (Spring)', 'Takarazuka Kinen'].includes(r.name);
+  if (has('Spring Champion')) preds['Spring Champion'] = r => (r.year === 'Senior' && ['Osaka Hai', 'Tenno Sho (Spring)'].includes(r.name)) || r.name === 'Takarazuka Kinen';
   if (has('Fall Champion')) preds['Fall Champion'] = r => r.year === 'Senior' && ['Tenno Sho (Autumn)', 'Japan Cup', 'Arima Kinen'].includes(r.name);
   if (has('Shield Bearer')) preds['Shield Bearer'] = r => r.year === 'Senior' && ['Tenno Sho (Spring)', 'Tenno Sho (Autumn)'].includes(r.name);
   if (has('Incredible')) preds['Incredible'] = r =>
@@ -769,7 +769,8 @@ async function optimizeSchedule(settingsInput = null, fixedChoices = {}) {
 
   for (const raceName of ['Satsuki Sho', 'Japanese Derby (Tokyo Yushun)', 'Kikuka Sho']) requireYLeqExpr('Stunning', exprRaceYear('Classic', raceName));
   for (const raceName of ['Oka Sho', 'Japanese Oaks', 'Shuka Sho']) requireYLeqExpr('Lady', exprRaceYear('Classic', raceName));
-  for (const raceName of ['Osaka Hai', 'Tenno Sho (Spring)', 'Takarazuka Kinen']) requireYLeqExpr('Spring Champion', exprRaceYear('Senior', raceName));
+  for (const raceName of ['Osaka Hai', 'Tenno Sho (Spring)']) requireYLeqExpr('Spring Champion', exprRaceYear('Senior', raceName));
+  requireYLeqExpr('Spring Champion', exprRaceAny('Takarazuka Kinen'));
   for (const raceName of ['Tenno Sho (Autumn)', 'Japan Cup', 'Arima Kinen']) requireYLeqExpr('Fall Champion', exprRaceYear('Senior', raceName));
   requireYLeqExpr('Shield Bearer', exprRaceYear('Senior', 'Tenno Sho (Spring)'));
   requireYLeqExpr('Shield Bearer', exprRaceYear('Senior', 'Tenno Sho (Autumn)'));
