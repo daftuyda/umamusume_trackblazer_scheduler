@@ -6,6 +6,7 @@ let state = {
   windows: [],
   epithets: [],
   manual_locks: {},
+  lost_locks: {},
   current_selected: [],
   freeze_before_index: null,
   ranks: [],
@@ -34,6 +35,7 @@ const ids = {
   threshold: document.getElementById('threshold'),
   maxConsec: document.getElementById('maxConsec'),
   forcedClimax: document.getElementById('forcedClimax'),
+  includeOpToggle: document.getElementById('includeOpToggle'),
   raceBonus: document.getElementById('raceBonus'),
   statWeight: document.getElementById('statWeight'),
   spWeight: document.getElementById('spWeight'),
@@ -132,7 +134,8 @@ function encodeShareState() {
   const data = {
     s,
     l: state.manual_locks,
-    f: state.freeze_before_index
+    f: state.freeze_before_index,
+    t: state.lost_locks
   };
   return btoa(JSON.stringify(data));
 }
@@ -179,6 +182,7 @@ importBtn.addEventListener('click', () => {
   try {
     const data = decodeShareState(raw);
     state.manual_locks = data.l || {};
+    state.lost_locks = data.t || {};
     state.freeze_before_index = data.f ?? null;
     if (data.s) loadSettingsToUI(data.s);
     closeShareModal();
@@ -214,9 +218,11 @@ function showTooltip(card, w) {
         <div class="tt-select-wrap" id="ttSelectWrap"></div>
       </div>`;
   } else {
+    const lostBadge = w.lost ? `<span class="tt-badge tt-badge-lost">LOST</span>` : '';
     html = `
       <div class="race-tooltip-header">
         <span class="tt-name">${w.selected}</span>
+        ${lostBadge}
         <span class="tt-badge tt-grade-${gradeClass(w.grade)}">${w.grade || ''}</span>
       </div>
       <div class="race-tooltip-body">
@@ -355,6 +361,7 @@ function showTooltip(card, w) {
     skipBtn.addEventListener('click', () => {
       if (solverEnabled) lockUpTo(w.index);
       state.manual_locks[String(w.index)] = '[No race]';
+      delete state.lost_locks[String(w.index)];
       if (solverEnabled) state.freeze_before_index = w.index;
       hideTooltip();
       queueSolve(0);
@@ -365,10 +372,11 @@ function showTooltip(card, w) {
       const lostBtn = document.createElement('button');
       lostBtn.className = 'tt-btn tt-btn-lost';
       lostBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v10"/><path d="M9 5l3-3 3 3"/><circle cx="12" cy="19" r="3"/></svg> Lost — Retry`;
-      lostBtn.title = 'Didn\'t get 1st? Lock this turn as training so the solver replans the race for a later turn.';
+      lostBtn.title = 'Didn\'t get 1st? Keep this race locked in the chain but skip its epithet credit so the solver replans the win.';
       lostBtn.addEventListener('click', () => {
         if (solverEnabled) lockUpTo(w.index);
-        state.manual_locks[String(w.index)] = '[No race]';
+        state.manual_locks[String(w.index)] = w.selected;
+        state.lost_locks[String(w.index)] = true;
         if (solverEnabled) state.freeze_before_index = w.index;
         hideTooltip();
         queueSolve(0);
@@ -435,6 +443,7 @@ function hideTooltip() {
 }
 
 function pickRace(choice, w) {
+  delete state.lost_locks[String(w.index)];
   if (choice === 'Auto') {
     delete state.manual_locks[String(w.index)];
     const remainingLocks = Object.keys(state.manual_locks).map(Number);
@@ -551,7 +560,8 @@ function settingsFromUI() {
     three_race_penalty_weight: Number(ids.threeRacePenalty.value || 0),
     race_cost: Number(ids.raceCost.value || 0),
     forced_epithets: [...state.forced_epithets],
-    forced_climax: ids.forcedClimax.value || ''
+    forced_climax: ids.forcedClimax.value || '',
+    include_op: ids.includeOpToggle.checked
   };
 }
 
@@ -575,6 +585,7 @@ function loadSettingsToUI(settings) {
   ids.threeRacePenalty.value = settings.three_race_penalty_weight;
   ids.raceCost.value = settings.race_cost;
   ids.forcedClimax.value = settings.forced_climax || '';
+  ids.includeOpToggle.checked = !!settings.include_op;
   if (settings.forced_epithets) {
     state.forced_epithets = [...settings.forced_epithets];
     renderForcedEpithetList();
@@ -638,6 +649,7 @@ function gradeClass(grade) {
   if (g === 'g1') return 'g1';
   if (g === 'g2') return 'g2';
   if (g === 'g3') return 'g3';
+  if (g === 'pre-op') return 'pre-op';
   return 'op';
 }
 
@@ -716,8 +728,9 @@ function renderTurnCell(w) {
   const card = document.createElement('div');
   const isLocked = w.lock_value && w.lock_value !== 'Auto';
   const isNoRace = w.selected === '[No race]';
+  const isLost = Boolean(w.lost);
 
-  card.className = `turn-card ${isLocked ? 'locked' : ''} ${isNoRace ? 'empty-turn' : ''}`;
+  card.className = `turn-card ${isLocked ? 'locked' : ''} ${isNoRace ? 'empty-turn' : ''} ${isLost ? 'lost-turn' : ''}`;
   if (w.grade) card.setAttribute('data-grade', w.grade);
   // Store epithet names for highlight matching
   const allEpNames = [...(w.epithet_names || []), ...(w.new_epithets || [])];
@@ -735,8 +748,8 @@ function renderTurnCell(w) {
   top.appendChild(slot);
   if (isLocked) {
     const badge = document.createElement('div');
-    badge.className = 'badge';
-    badge.textContent = 'LCK';
+    badge.className = isLost ? 'badge badge-lost' : 'badge';
+    badge.textContent = isLost ? 'LOST' : 'LCK';
     top.appendChild(badge);
   }
   inner.appendChild(top);
@@ -997,7 +1010,8 @@ function saveStateToStorage() {
     const data = {
       s: settingsFromUI(),
       l: state.manual_locks,
-      f: state.freeze_before_index
+      f: state.freeze_before_index,
+      t: state.lost_locks
     };
     localStorage.setItem('uma-schedule', JSON.stringify(data));
   } catch (e) { /* quota exceeded — ignore */ }
@@ -1027,6 +1041,8 @@ function queueSolve(delay = 250) {
 function applyManualLocksToWindows() {
   for (const w of state.windows) {
     const lock = state.manual_locks[String(w.index)];
+    const isLost = Boolean(state.lost_locks[String(w.index)]);
+    w.lost = isLost;
     if (!lock || lock === 'Auto') continue;
     if (lock === '[No race]') {
       w.selected = '[No race]';
@@ -1044,8 +1060,8 @@ function applyManualLocksToWindows() {
       w.track = rc ? rc.track : w.track;
       w.surface = rc ? rc.surface : w.surface;
       w.distance = rc ? rc.distance : w.distance;
-      w.race_stats = rc ? rc.stats : w.race_stats;
-      w.race_sp = rc ? rc.sp : w.race_sp;
+      w.race_stats = isLost ? 0 : (rc ? rc.stats : w.race_stats);
+      w.race_sp = isLost ? 0 : (rc ? rc.sp : w.race_sp);
       w.lock_value = lock;
     }
   }
@@ -1065,7 +1081,7 @@ async function postSolve() {
   ids.statusNote.textContent = 'Recomputing\u2026';
   try {
     const payload = await solveWithManualLocks(
-      settingsFromUI(), state.current_selected, state.manual_locks, state.freeze_before_index
+      settingsFromUI(), state.current_selected, state.manual_locks, state.freeze_before_index, state.lost_locks
     );
     if (seq !== solveSequence) return;
     applyPayload(payload);
@@ -1129,6 +1145,7 @@ function bindAutoSolveListeners() {
         if (v === '[No race]') kept[k] = v;
       }
       state.manual_locks = kept;
+      state.lost_locks = {};
       state.freeze_before_index = null;
       queueSolve(0);
     });
@@ -1136,6 +1153,17 @@ function bindAutoSolveListeners() {
 
   ids.maxConsec.addEventListener('change', () => queueSolve(0));
   ids.forcedClimax.addEventListener('change', () => queueSolve(0));
+  ids.includeOpToggle.addEventListener('change', () => {
+    // Clear race locks — eligible races changed
+    const kept = {};
+    for (const [k, v] of Object.entries(state.manual_locks)) {
+      if (v === '[No race]') kept[k] = v;
+    }
+    state.manual_locks = kept;
+    state.lost_locks = {};
+    state.freeze_before_index = null;
+    queueSolve(0);
+  });
 
   [ids.raceBonus, ids.statWeight, ids.spWeight, ids.hintWeight, ids.epithetMultiplier, ids.threeRacePenalty, ids.raceCost].forEach(el => {
     el.addEventListener('input', () => queueSolve(250));
@@ -1154,6 +1182,7 @@ function bindAutoSolveListeners() {
       kept[String(idx)] = '[No race]';
     }
     state.manual_locks = kept;
+    state.lost_locks = {};
     state.freeze_before_index = null;
     queueSolve(0);
   });
@@ -1198,6 +1227,7 @@ async function init() {
     try {
       const data = decodeShareState(hash);
       state.manual_locks = data.l || {};
+      state.lost_locks = data.t || {};
       state.freeze_before_index = data.f ?? null;
       if (data.s) loadSettingsToUI(data.s);
       showToast('Imported shared schedule!');
@@ -1208,6 +1238,7 @@ async function init() {
     }
   } else if (saved) {
     state.manual_locks = saved.l || {};
+    state.lost_locks = saved.t || {};
     state.freeze_before_index = saved.f ?? null;
     if (saved.s) loadSettingsToUI(saved.s);
   } else {

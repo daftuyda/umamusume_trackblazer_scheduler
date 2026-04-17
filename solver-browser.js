@@ -24,7 +24,9 @@ function isStandardDistance(race) {
 const BASE_REWARD = {
   G1: { stats: 10, sp: 35 },
   G2: { stats: 8, sp: 25 },
-  G3: { stats: 8, sp: 25 }
+  G3: { stats: 8, sp: 25 },
+  OP: { stats: 5, sp: 15 },
+  'Pre-OP': { stats: 5, sp: 10 }
 };
 const NO_RACE = '[No race]';
 const AUTO = 'Auto';
@@ -220,7 +222,8 @@ function defaultSettings() {
     max_consecutive_races: 0,
     race_cost: 100,
     forced_epithets: [],
-    forced_climax: ''
+    forced_climax: '',
+    include_op: false
   };
 }
 
@@ -243,7 +246,10 @@ function normalizeSettings(settings = null) {
   return s;
 }
 
+const OP_GRADES = new Set(['OP', 'Pre-OP']);
+
 function raceIsEligible(race, settings) {
+  if (OP_GRADES.has(race.grade) && !settings.include_op) return false;
   const threshold = RANK_VALUE[settings.threshold];
   const apt = settings.aptitudes;
   return RANK_VALUE[apt[race.distance]] >= threshold && RANK_VALUE[apt[race.surface]] >= threshold;
@@ -484,7 +490,7 @@ function buildFullEpithetMap(scheduleRows, selectedRaces, completedEpithetNames)
   const preds = epithetRacePredicates(completedEpithetNames);
   const map = {};
   for (const row of scheduleRows) {
-    if (row.selected === NO_RACE) continue;
+    if (row.selected === NO_RACE || row.lost) continue;
     const race = selectedRaces.find(r => r.name === row.selected && r.year === row.year);
     if (!race) continue;
     const matching = [];
@@ -558,11 +564,12 @@ function mergeExprs(...exprs) {
   return merged;
 }
 
-async function optimizeSchedule(settingsInput = null, fixedChoices = {}) {
+async function optimizeSchedule(settingsInput = null, fixedChoices = {}, lostIndices = []) {
   const data = await loadData();
   const { windows, epithets, glpk } = data;
   const settings = normalizeSettings(settingsInput);
   const fixed = Object.fromEntries(Object.entries(fixedChoices || {}).map(([k, v]) => [Number(k), v]));
+  const lostSet = new Set((lostIndices || []).map(Number));
 
   // When forced epithets are active, convert summer "[No race]" locks into soft penalties
   // so the solver can use those slots if needed (summer training is very valuable).
@@ -578,6 +585,22 @@ async function optimizeSchedule(settingsInput = null, fixedChoices = {}) {
   }
 
   const actionsByWindow = buildActions(settings, windows, fixed);
+
+  // Mark "lost retry" race actions: they occupy the slot for consecutive-race
+  // and climax counting, but contribute no stats/SP and don't count for epithets.
+  for (const idx of lostSet) {
+    const lockedName = fixed[idx];
+    if (!lockedName || lockedName === NO_RACE) continue;
+    const bucket = actionsByWindow[idx];
+    if (!bucket) continue;
+    const match = bucket.find(a => a.race && a.choice === lockedName);
+    if (match) {
+      match.lost = true;
+      match.stats = 0;
+      match.sp = 0;
+      match.value = 0;
+    }
+  }
 
   const xVars = [];
   const actionLookup = new Map();
@@ -653,7 +676,7 @@ async function optimizeSchedule(settingsInput = null, fixedChoices = {}) {
   function actionSum(predicate) {
     const coeffs = {};
     for (const [varName, info] of actionLookup.entries()) {
-      if (info.race && predicate(info.race)) coeffs[varName] = (coeffs[varName] || 0) + 1;
+      if (info.race && !info.lost && predicate(info.race)) coeffs[varName] = (coeffs[varName] || 0) + 1;
     }
     return coeffs;
   }
@@ -851,10 +874,10 @@ async function optimizeSchedule(settingsInput = null, fixedChoices = {}) {
     }
   }
 
-  // Force climax type: plurality — the chosen type must have strictly more races
-  // than every other competing type. For distance climaxes the rivals are the
-  // other 3 distances; for Dirt the rival is Turf.
-  // Per rival: count(chosen) - count(rival) >= 1
+  // Force climax type: plurality — the chosen type must lead every rival type
+  // by at least 2 races. The +2 buffer covers the untracked debut race, which
+  // may itself count toward a rival type.
+  // Per rival: count(chosen) - count(rival) >= 2
   const climax = settings.forced_climax || '';
   if (climax) {
     const isDirt = climax === 'Dirt';
@@ -876,7 +899,7 @@ async function optimizeSchedule(settingsInput = null, fixedChoices = {}) {
         }
       }
       if (coeffs.length) {
-        addConstraint(model, glpk, `climax_vs_${rival}`, coeffs, glpk.GLP_LO, 1, 0);
+        addConstraint(model, glpk, `climax_vs_${rival}`, coeffs, glpk.GLP_LO, 2, 0);
       }
     }
   }
@@ -901,14 +924,14 @@ async function optimizeSchedule(settingsInput = null, fixedChoices = {}) {
       }
     }
     chosenActions.push(chosen);
-    if (chosen.race) selectedRaces.push(chosen.race);
+    if (chosen.race && !chosen.lost) selectedRaces.push(chosen.race);
   }
 
   const solvedEpithets = completedEpithets(selectedRaces, data);
   let raceInstanceCounter = 0;
   const raceIndicesByWindow = {};
   chosenActions.forEach((chosen, i) => {
-    if (chosen.race) {
+    if (chosen.race && !chosen.lost) {
       raceIndicesByWindow[i] = raceInstanceCounter;
       raceInstanceCounter += 1;
     } else {
@@ -922,13 +945,14 @@ async function optimizeSchedule(settingsInput = null, fixedChoices = {}) {
   for (let i = 0; i < chosenActions.length; i += 1) {
     const chosen = chosenActions[i];
     const race = chosen.race;
-    if (race) runningSelected.push(race);
+    const isLost = Boolean(chosen.lost);
+    if (race && !isLost) runningSelected.push(race);
     const now = completedEpithets(runningSelected, data);
     const newEpithets = now.filter(e => !previousEpithets.includes(e));
     previousEpithets = now;
 
     let linkedEpithets = [];
-    if (race && raceIndicesByWindow[i] !== null) {
+    if (race && !isLost && raceIndicesByWindow[i] !== null) {
       linkedEpithets = linkedEpithetsForSelectedRace(selectedRaces, raceIndicesByWindow[i], solvedEpithets, settings, data).linked;
     }
     const epithetNames = data.epithets
@@ -944,6 +968,7 @@ async function optimizeSchedule(settingsInput = null, fixedChoices = {}) {
       month: windows[i].month,
       half: windows[i].half,
       selected: chosen.choice,
+      lost: isLost,
       track: race ? race.track : '',
       grade: race ? race.grade : '',
       distance: race ? race.distance : '',
@@ -1028,13 +1053,16 @@ async function optimizeSchedule(settingsInput = null, fixedChoices = {}) {
   };
 }
 
-export async function solveWithManualLocks(settingsInput, currentSelected = [], manualLocks = {}, freezeBeforeIndex = null) {
+export async function solveWithManualLocks(settingsInput, currentSelected = [], manualLocks = {}, freezeBeforeIndex = null, lostLocks = {}) {
   const settings = normalizeSettings(settingsInput);
   const locks = Object.fromEntries(
     Object.entries(manualLocks || {})
       .filter(([, v]) => ![null, '', AUTO].includes(v))
       .map(([k, v]) => [Number(k), v])
   );
+  const lostIndices = Object.keys(lostLocks || {})
+    .filter(k => lostLocks[k])
+    .map(Number);
   let fixed = {};
   if (freezeBeforeIndex == null && Object.keys(locks).length && currentSelected.length) {
     // Only use race locks (not "No race" blocks) to determine freeze point
@@ -1052,7 +1080,7 @@ export async function solveWithManualLocks(settingsInput, currentSelected = [], 
     }
   }
   fixed = { ...fixed, ...locks };
-  let result = await optimizeSchedule(settings, fixed);
+  let result = await optimizeSchedule(settings, fixed, lostIndices);
 
   // If infeasible and forced epithets/climax are active, retry without them
   let droppedEpithets = [];
@@ -1060,7 +1088,7 @@ export async function solveWithManualLocks(settingsInput, currentSelected = [], 
   if (!['OPTIMAL', 'FEASIBLE'].includes(result.status) && settings.forced_epithets?.length) {
     const allForced = [...settings.forced_epithets];
     const relaxed = { ...settings, forced_epithets: [] };
-    result = await optimizeSchedule(relaxed, fixed);
+    result = await optimizeSchedule(relaxed, fixed, lostIndices);
     if (['OPTIMAL', 'FEASIBLE'].includes(result.status)) {
       const completed = new Set(result.epithets || []);
       droppedEpithets = allForced.filter(name => !completed.has(name));
@@ -1068,7 +1096,7 @@ export async function solveWithManualLocks(settingsInput, currentSelected = [], 
   }
   if (!['OPTIMAL', 'FEASIBLE'].includes(result.status) && settings.forced_climax) {
     const relaxed = { ...settings, forced_epithets: [], forced_climax: '' };
-    result = await optimizeSchedule(relaxed, fixed);
+    result = await optimizeSchedule(relaxed, fixed, lostIndices);
     if (['OPTIMAL', 'FEASIBLE'].includes(result.status)) {
       droppedClimax = true;
       if (settings.forced_epithets?.length) {
