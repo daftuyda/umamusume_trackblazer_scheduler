@@ -447,7 +447,13 @@ function pickRace(choice, w) {
   if (choice === 'Auto') {
     delete state.manual_locks[String(w.index)];
     const remainingLocks = Object.keys(state.manual_locks).map(Number);
-    state.freeze_before_index = remainingLocks.length ? Math.max(...remainingLocks) : null;
+    // Cap freeze at the unlocked index. Without this, a later manual lock
+    // (e.g. summer "[No race]" locks past w.index) pushes the cutoff past w.index,
+    // which pins currentSelected[w.index] — including the "[No race]" we just set —
+    // and prevents the solver from re-deciding the slot the user just unlocked.
+    state.freeze_before_index = remainingLocks.length
+      ? Math.min(Number(w.index), Math.max(...remainingLocks))
+      : null;
   } else {
     state.manual_locks[String(w.index)] = choice;
     state.freeze_before_index = Number(w.index);
