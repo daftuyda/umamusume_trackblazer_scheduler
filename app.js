@@ -43,6 +43,7 @@ const ids = {
   epithetMultiplier: document.getElementById('epithetMultiplier'),
   threeRacePenalty: document.getElementById('threeRacePenalty'),
   raceCost: document.getElementById('raceCost'),
+  fanBonus: document.getElementById('fanBonus'),
   rebuildBtn: document.getElementById('rebuildBtn'),
   clearLocksBtn: document.getElementById('clearLocksBtn'),
   metricEpithets: document.getElementById('metricEpithets'),
@@ -565,6 +566,7 @@ function settingsFromUI() {
     epithet_multiplier: Number(ids.epithetMultiplier.value || 0),
     three_race_penalty_weight: Number(ids.threeRacePenalty.value || 0),
     race_cost: Number(ids.raceCost.value || 0),
+    fan_bonus_pct: Number(ids.fanBonus.value || 0),
     forced_epithets: [...state.forced_epithets],
     forced_climax: ids.forcedClimax.value || '',
     include_op: ids.includeOpToggle.checked
@@ -590,6 +592,7 @@ function loadSettingsToUI(settings) {
   ids.epithetMultiplier.value = settings.epithet_multiplier;
   ids.threeRacePenalty.value = settings.three_race_penalty_weight;
   ids.raceCost.value = settings.race_cost;
+  ids.fanBonus.value = settings.fan_bonus_pct ?? 0;
   ids.forcedClimax.value = settings.forced_climax || '';
   ids.includeOpToggle.checked = !!settings.include_op;
   if (settings.forced_epithets) {
@@ -953,10 +956,19 @@ function renderSummary() {
   const elRaceStats = document.getElementById('metricRaceStats');
   const elRaceSP = document.getElementById('metricRaceSP');
   const elEpithetStats = document.getElementById('metricEpithetStats');
+  const elFans = document.getElementById('metricFans');
   const elHints = document.getElementById('metricHints');
   if (elRaceStats) elRaceStats.textContent = s.race_stats || 0;
   if (elRaceSP) elRaceSP.textContent = s.race_skill_points || 0;
   if (elEpithetStats) elEpithetStats.textContent = s.epithet_stat_points || 0;
+  if (elFans) {
+    const fans = s.race_fans || 0;
+    elFans.textContent = fans.toLocaleString();
+    const bonus = Number(state.settings?.fan_bonus_pct || 0);
+    elFans.title = bonus
+      ? `Career race fans assuming 1st place, with +${bonus}% deck fan bonus.`
+      : 'Career race fans assuming 1st place. Set Deck Fan Bonus % in settings to include support card multipliers.';
+  }
 
   const hintNames = s.epithet_hint_names || [];
   if (elHints) elHints.textContent = hintNames.length ? hintNames.length : '0';
@@ -1058,6 +1070,7 @@ function applyManualLocksToWindows() {
       w.distance = '';
       w.race_stats = 0;
       w.race_sp = 0;
+      w.race_fans = 0;
       w.lock_value = '[No race]';
     } else {
       const rc = (w.race_choices || []).find(r => r.name === lock);
@@ -1068,6 +1081,7 @@ function applyManualLocksToWindows() {
       w.distance = rc ? rc.distance : w.distance;
       w.race_stats = isLost ? 0 : (rc ? rc.stats : w.race_stats);
       w.race_sp = isLost ? 0 : (rc ? rc.sp : w.race_sp);
+      w.race_fans = isLost ? 0 : (rc ? (rc.fans || 0) : (w.race_fans || 0));
       w.lock_value = lock;
     }
   }
@@ -1077,6 +1091,7 @@ function applyManualLocksToWindows() {
     state.summary.scheduled_races = state.current_selected.filter(s => s !== '[No race]').length;
     state.summary.race_stats = state.windows.reduce((sum, w) => sum + (w.race_stats || 0), 0);
     state.summary.race_skill_points = state.windows.reduce((sum, w) => sum + (w.race_sp || 0), 0);
+    state.summary.race_fans = state.windows.reduce((sum, w) => sum + (w.race_fans || 0), 0);
   }
 }
 
@@ -1171,7 +1186,7 @@ function bindAutoSolveListeners() {
     queueSolve(0);
   });
 
-  [ids.raceBonus, ids.statWeight, ids.spWeight, ids.hintWeight, ids.epithetMultiplier, ids.threeRacePenalty, ids.raceCost].forEach(el => {
+  [ids.raceBonus, ids.statWeight, ids.spWeight, ids.hintWeight, ids.epithetMultiplier, ids.threeRacePenalty, ids.raceCost, ids.fanBonus].forEach(el => {
     el.addEventListener('input', () => queueSolve(250));
     el.addEventListener('change', () => queueSolve(0));
   });

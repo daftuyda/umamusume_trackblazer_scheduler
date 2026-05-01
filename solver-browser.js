@@ -16,17 +16,16 @@ const TOHOKU_TRACKS = new Set(['Fukushima', 'Niigata']);
 const HOKKAIDO_TRACKS = new Set(['Sapporo', 'Hakodate']);
 const KOKURA_TRACKS = new Set(['Kokura']);
 
-const STANDARD_LENGTHS = new Set([1200, 1600, 2000, 2400]);
 function isStandardDistance(race) {
-  return STANDARD_LENGTHS.has(race.length);
+  return Number.isFinite(race.length) && race.length > 0 && race.length % 400 === 0;
 }
 
 const BASE_REWARD = {
-  G1: { stats: 10, sp: 35 },
-  G2: { stats: 8, sp: 25 },
-  G3: { stats: 8, sp: 25 },
-  OP: { stats: 5, sp: 15 },
-  'Pre-OP': { stats: 5, sp: 10 }
+  G1: { stats: 10, sp: 35, fans: 10000 },
+  G2: { stats: 8, sp: 25, fans: 6000 },
+  G3: { stats: 8, sp: 25, fans: 4500 },
+  OP: { stats: 5, sp: 15, fans: 2400 },
+  'Pre-OP': { stats: 5, sp: 10, fans: 1300 }
 };
 const NO_RACE = '[No race]';
 const AUTO = 'Auto';
@@ -173,9 +172,10 @@ function clone(obj) {
 
 async function loadData() {
   if (DATA) return DATA;
-  const [races, epithets, glpk] = await Promise.all([
+  const [races, epithets, debutRaces, glpk] = await Promise.all([
     fetch('races.json').then(r => r.json()),
     fetch('epithets.json').then(r => r.json()),
+    fetch('debut_races.json').then(r => r.json()).catch(() => ({})),
     glpkPromise
   ]);
 
@@ -204,8 +204,30 @@ async function loadData() {
     }
   }
 
-  DATA = { races, epithets, epithetByName, windows, glpk };
+  DATA = { races, epithets, epithetByName, windows, debutRaces, glpk };
   return DATA;
+}
+
+// The Junior Late-Jun debut race is auto-run by the player. It is Pre-OP grade
+// (so doesn't count toward graded-race epithets), but does contribute to
+// distance/surface/Pro Racer/Turf Tussler counters.
+function debutRaceFor(settings, data) {
+  const preset = settings?.preset;
+  if (!preset || !data?.debutRaces) return null;
+  const debut = data.debutRaces[preset];
+  if (!debut) return null;
+  return {
+    name: debut.name,
+    grade: 'Pre-OP',
+    distance: debut.distance,
+    surface: debut.surface,
+    track: debut.track,
+    length: debut.length,
+    period: 'Late Jun',
+    year: 'Junior',
+    fans: 50,
+    is_debut: true,
+  };
 }
 
 function defaultSettings() {
@@ -221,6 +243,7 @@ function defaultSettings() {
     three_race_penalty_weight: 3.0,
     max_consecutive_races: 0,
     race_cost: 100,
+    fan_bonus_pct: 0,
     forced_epithets: [],
     forced_climax: '',
     include_op: false
@@ -239,7 +262,7 @@ function normalizeSettings(settings = null) {
       s.aptitudes = { ...s.aptitudes, ...settings.aptitudes };
     }
   }
-  for (const key of ['race_bonus_pct', 'stat_weight', 'sp_weight', 'hint_weight', 'epithet_multiplier', 'three_race_penalty_weight', 'race_cost']) {
+  for (const key of ['race_bonus_pct', 'stat_weight', 'sp_weight', 'hint_weight', 'epithet_multiplier', 'three_race_penalty_weight', 'race_cost', 'fan_bonus_pct']) {
     s[key] = Number(s[key] ?? 0);
   }
   s.max_consecutive_races = Number(s.max_consecutive_races ?? 0);
@@ -693,13 +716,24 @@ async function optimizeSchedule(settingsInput = null, fixedChoices = {}, lostInd
     return { [`y_${name}`]: 1 };
   }
 
-  function requireYLeqExpr(yName, exprCoeffs) {
+  // The Junior Late-Jun debut race is auto-run and may satisfy some epithet
+  // predicates (distance/surface/Pro Racer counters). Where it does, we reduce
+  // the corresponding LP threshold by 1 (or skip a "race must exist" constraint
+  // outright) and we prepend it to selectedRaces post-solve.
+  const debutRace = debutRaceFor(settings, data);
+  function debutBonus(predicate) {
+    return debutRace && predicate(debutRace) ? 1 : 0;
+  }
+
+  function requireYLeqExpr(yName, exprCoeffs, debutContrib = 0) {
+    if (debutContrib >= 1) return;
     const coeffs = { ...exprCoeffs, [`y_${yName}`]: (exprCoeffs[`y_${yName}`] || 0) - 1 };
     addConstraint(model, glpk, `req_${yName}_${model.subjectTo.length}`, varsToCoeffPairs(coeffs), glpk.GLP_LO, 0, 0);
   }
 
-  function requireCountThreshold(yName, exprCoeffs, threshold) {
-    const coeffs = { ...exprCoeffs, [`y_${yName}`]: (exprCoeffs[`y_${yName}`] || 0) - threshold };
+  function requireCountThreshold(yName, exprCoeffs, threshold, debutContrib = 0) {
+    const effectiveThreshold = Math.max(0, threshold - debutContrib);
+    const coeffs = { ...exprCoeffs, [`y_${yName}`]: (exprCoeffs[`y_${yName}`] || 0) - effectiveThreshold };
     addConstraint(model, glpk, `cnt_${yName}_${model.subjectTo.length}`, varsToCoeffPairs(coeffs), glpk.GLP_LO, 0, 0);
   }
 
@@ -844,12 +878,12 @@ async function optimizeSchedule(settingsInput = null, fixedChoices = {}, lostInd
   requireCountThreshold('Dirt G1 Star', exprDirtG1, 4);
   requireCountThreshold('Dirt G1 Powerhouse', exprDirtG1, 5);
   requireCountThreshold('Dirt G1 Dominator', exprDirtG1, 9);
-  requireCountThreshold('Standard Distance Leader', exprStandard, 10);
-  requireCountThreshold('Non-Standard Distance Leader', exprNonStandard, 10);
-  requireCountThreshold('Dirty Work', exprDirt, 5);
-  requireCountThreshold('Playing Dirty', exprDirt, 10);
-  requireCountThreshold('Eat My Dust', exprDirt, 15);
-  requireCountThreshold('Pro Racer', exprOpPlus, 10);
+  requireCountThreshold('Standard Distance Leader', exprStandard, 10, debutBonus(r => isStandardDistance(r)));
+  requireCountThreshold('Non-Standard Distance Leader', exprNonStandard, 10, debutBonus(r => !isStandardDistance(r)));
+  requireCountThreshold('Dirty Work', exprDirt, 5, debutBonus(r => r.surface === 'Dirt'));
+  requireCountThreshold('Playing Dirty', exprDirt, 10, debutBonus(r => r.surface === 'Dirt'));
+  requireCountThreshold('Eat My Dust', exprDirt, 15, debutBonus(r => r.surface === 'Dirt'));
+  requireCountThreshold('Pro Racer', exprOpPlus, 10, debutBonus(r => ['G1', 'G2', 'G3', 'OP', 'Pre-OP'].includes(r.grade)));
   requireCountThreshold('Junior Jewel', exprJuniorStakes, 3);
   requireCountThreshold('Globe-Trotter', exprCountry, 3);
   requireCountThreshold('Umatastic', exprUmamusume, 3);
@@ -858,13 +892,14 @@ async function optimizeSchedule(settingsInput = null, fixedChoices = {}, lostInd
   requireCountThreshold('Tohoku Top Dog', exprTohoku, 3);
   requireCountThreshold('Hokkaido Hotshot', exprHokkaido, 3);
   requireCountThreshold('Kokura Constable', exprKokura, 2);
-  requireYLeqExpr('Dirt Dancer', actionSum(r => r.surface === 'Dirt' && r.distance === 'Sprint'));
-  requireYLeqExpr('Dirt Dancer', actionSum(r => r.surface === 'Dirt' && r.distance === 'Mile'));
-  requireYLeqExpr('Dirt Dancer', actionSum(r => r.surface === 'Dirt' && r.distance === 'Medium'));
-  requireYLeqExpr('Turf Tussler', actionSum(r => r.surface === 'Turf' && r.distance === 'Sprint'));
-  requireYLeqExpr('Turf Tussler', actionSum(r => r.surface === 'Turf' && r.distance === 'Mile'));
-  requireYLeqExpr('Turf Tussler', actionSum(r => r.surface === 'Turf' && r.distance === 'Medium'));
-  requireYLeqExpr('Turf Tussler', actionSum(r => r.surface === 'Turf' && r.distance === 'Long'));
+  for (const dist of ['Sprint', 'Mile', 'Medium']) {
+    const pred = r => r.surface === 'Dirt' && r.distance === dist;
+    requireYLeqExpr('Dirt Dancer', actionSum(pred), debutBonus(pred));
+  }
+  for (const dist of ['Sprint', 'Mile', 'Medium', 'Long']) {
+    const pred = r => r.surface === 'Turf' && r.distance === dist;
+    requireYLeqExpr('Turf Tussler', actionSum(pred), debutBonus(pred));
+  }
 
   // Force selected epithets (hard constraint: y = 1).
   for (const epName of (settings.forced_epithets || [])) {
@@ -914,6 +949,10 @@ async function optimizeSchedule(settingsInput = null, fixedChoices = {}, lostInd
 
   const chosenActions = [];
   const selectedRaces = [];
+  // The debut race runs before any window in our schedule, so it's always
+  // first in the selectedRaces list. It contributes to epithet counters but
+  // is not a window choice.
+  if (debutRace) selectedRaces.push(debutRace);
   for (let i = 0; i < actionsByWindow.length; i += 1) {
     let chosen = actionsByWindow[i][0];
     for (let j = 0; j < actionsByWindow[i].length; j += 1) {
@@ -928,7 +967,8 @@ async function optimizeSchedule(settingsInput = null, fixedChoices = {}, lostInd
   }
 
   const solvedEpithets = completedEpithets(selectedRaces, data);
-  let raceInstanceCounter = 0;
+  // selectedRaces[0] is the debut (when present); window choices start at the next slot.
+  let raceInstanceCounter = debutRace ? 1 : 0;
   const raceIndicesByWindow = {};
   chosenActions.forEach((chosen, i) => {
     if (chosen.race && !chosen.lost) {
@@ -939,8 +979,13 @@ async function optimizeSchedule(settingsInput = null, fixedChoices = {}, lostInd
     }
   });
 
+  const fanMult = 1 + Math.max(0, settings.fan_bonus_pct) / 100;
   const scheduleRows = [];
   const runningSelected = [];
+  // Seed the per-window epithet accumulator with the debut race so any epithet
+  // that becomes complete partway through the schedule is attributed at the
+  // correct window (and the debut isn't double-counted).
+  if (debutRace) runningSelected.push(debutRace);
   let previousEpithets = [];
   for (let i = 0; i < chosenActions.length; i += 1) {
     const chosen = chosenActions[i];
@@ -960,6 +1005,10 @@ async function optimizeSchedule(settingsInput = null, fixedChoices = {}, lostInd
       .filter(name => new Set([...linkedEpithets, ...newEpithets]).has(name));
     const epithetValue = epithetsWeightedValue(epithetNames, settings, data);
     const tileValue = Number((chosen.value + epithetValue).toFixed(2));
+    const baseFans = (race && !isLost)
+      ? (race.fans != null ? race.fans : (BASE_REWARD[race.grade]?.fans || 0))
+      : 0;
+    const raceFans = Math.floor(baseFans * fanMult);
 
     scheduleRows.push({
       index: i,
@@ -975,6 +1024,7 @@ async function optimizeSchedule(settingsInput = null, fixedChoices = {}, lostInd
       surface: race ? race.surface : '',
       race_stats: chosen.stats,
       race_sp: chosen.sp,
+      race_fans: raceFans,
       race_value: Number(chosen.value.toFixed(2)),
       linked_epithets: linkedEpithets,
       epithet_names: epithetNames,
@@ -1009,6 +1059,7 @@ async function optimizeSchedule(settingsInput = null, fixedChoices = {}, lostInd
 
   const totalRaceStats = chosenActions.reduce((sum, chosen) => sum + chosen.stats, 0);
   const totalRaceSp = chosenActions.reduce((sum, chosen) => sum + chosen.sp, 0);
+  const totalRaceFans = scheduleRows.reduce((sum, row) => sum + (row.race_fans || 0), 0);
   const epithetStatPoints = solvedEpithets.reduce((sum, name) => sum + epithetStatTotal(name, data), 0);
   const epithetHintNames = solvedEpithets.filter(name => data.epithetByName[name].reward_kind === 'hint').map(name => hintSkillName(name, data));
   const weightedRaceValueGross = settings.stat_weight * totalRaceStats + settings.sp_weight * totalRaceSp;
@@ -1044,6 +1095,7 @@ async function optimizeSchedule(settingsInput = null, fixedChoices = {}, lostInd
     triple_penalty_total: Number(triplePenaltyTotal.toFixed(2)),
     total_race_stats: totalRaceStats,
     total_race_sp: totalRaceSp,
+    total_race_fans: totalRaceFans,
     epithet_stat_points: epithetStatPoints,
     epithet_hint_count: epithetHintNames.length,
     epithet_hint_names: epithetHintNames,
@@ -1115,12 +1167,14 @@ export async function solveWithManualLocks(settingsInput, currentSelected = [], 
 function allDropdownChoices(windows, settings) {
   const choiceMap = {};
   const rb = settings ? Math.max(0, settings.race_bonus_pct || 0) / 100 : 0;
+  const fanMult = settings ? 1 + Math.max(0, settings.fan_bonus_pct || 0) / 100 : 1;
   for (const w of windows) {
     const eligible = settings
       ? w.races.filter(r => raceIsEligible(r, settings))
       : w.races;
     const raceChoices = eligible.map(r => {
-      const base = BASE_REWARD[r.grade] || { stats: 0, sp: 0 };
+      const base = BASE_REWARD[r.grade] || { stats: 0, sp: 0, fans: 0 };
+      const baseFans = r.fans != null ? r.fans : (base.fans || 0);
       return {
         name: r.name,
         grade: r.grade,
@@ -1128,7 +1182,8 @@ function allDropdownChoices(windows, settings) {
         surface: r.surface,
         track: r.track,
         stats: Math.floor(base.stats * (1 + rb)),
-        sp: Math.floor(base.sp * (1 + rb))
+        sp: Math.floor(base.sp * (1 + rb)),
+        fans: Math.floor(baseFans * fanMult)
       };
     });
     choiceMap[w.index] = raceChoices;
@@ -1177,6 +1232,7 @@ function formatPayload(result, manualLocks = {}, currentSelected = []) {
       triple_penalty_total: result.triple_penalty_total || 0,
       race_stats: result.total_race_stats || 0,
       race_skill_points: result.total_race_sp || 0,
+      race_fans: result.total_race_fans || 0,
       epithet_stat_points: result.epithet_stat_points || 0,
       epithet_hint_count: result.epithet_hint_count || 0,
       epithet_hint_names: result.epithet_hint_names || [],

@@ -77,6 +77,12 @@
       </div>
 
       <div class="form-group">
+        <label class="label" for="fanBonus">Deck Fan Bonus %</label>
+        <input id="fanBonus" type="number" min="0" step="1" placeholder="0">
+        <div class="helper" style="margin-top:4px;">Extra fan multiplier from your support deck. Adds to the "Est. Fans" metric (assumes 1st-place finishes).</div>
+      </div>
+
+      <div class="form-group">
         <label class="label" for="forcedClimax">Force TS Climax</label>
         <select id="forcedClimax">
           <option value="">None</option>
@@ -181,6 +187,10 @@
         <div class="top-metric accent">
           <span class="tm-label">Epithet Stats</span>
           <span class="tm-value" id="metricEpithetStats">0</span>
+        </div>
+        <div class="top-metric accent">
+          <span class="tm-label">Est. Fans</span>
+          <span class="tm-value" id="metricFans">0</span>
         </div>
         <div class="top-metric">
           <span class="tm-label">Hints</span>
