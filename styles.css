@@ -236,6 +236,7 @@ button, select, input { font: inherit; color: var(--text); }
 .top-title {
   margin: 0; font-size: 17px; font-weight: 800;
   white-space: nowrap; letter-spacing: 0.2px;
+  min-width: 0; overflow: hidden; text-overflow: ellipsis;
 }
 .top-credits {
   font-size: 11px; opacity: 0.65; white-space: nowrap;
@@ -585,16 +586,29 @@ details.advanced[open] summary::before { transform: rotate(90deg); }
   background: linear-gradient(180deg, var(--green-start), var(--green-end));
   padding: 8px 12px;
   border-radius: calc(var(--radius) - 2px) calc(var(--radius) - 2px) 0 0;
-  display: flex; justify-content: space-between; align-items: center;
+  display: flex; justify-content: flex-start; align-items: center; gap: 8px;
 }
 .race-tooltip-header .tt-name {
   font-size: 15px; font-weight: 800; color: #fff;
   text-shadow: 0 1px 3px rgba(0,0,0,0.35);
+  flex: 1; min-width: 0; overflow-wrap: anywhere;
 }
 .race-tooltip-header .tt-badge {
   color: #fff; font-size: 11px; font-weight: 700;
   padding: 2px 8px; border-radius: 999px; background: rgba(255,255,255,0.25);
+  flex-shrink: 0;
 }
+.tt-close {
+  width: 28px; height: 28px; border-radius: 50%;
+  border: 1px solid rgba(255,255,255,0.35);
+  background: rgba(255,255,255,0.2); color: #fff;
+  cursor: pointer; flex-shrink: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  padding: 0; font-size: 18px; line-height: 1; font-weight: 800;
+  transition: background 0.15s, transform 0.1s;
+}
+.tt-close:hover { background: rgba(255,255,255,0.35); }
+.tt-close:active { transform: scale(0.92); }
 .tt-badge.tt-grade-g1 { background: var(--g1); }
 .tt-badge.tt-grade-g2 { background: var(--g2); }
 .tt-badge.tt-grade-g3 { background: var(--g3); }
@@ -805,9 +819,174 @@ details.advanced[open] summary::before { transform: rotate(90deg); }
   .year-section:last-child { border-bottom: none; }
 }
 @media (max-width: 600px) {
-  .top-bar { flex-wrap: wrap; }
-  .top-metrics { width: 100%; justify-content: flex-start; }
+  body { font-size: 14px; -webkit-text-size-adjust: 100%; }
+
+  .app-shell { padding: 0 8px 12px; }
+
+  .settings-drawer {
+    width: 100dvw;
+    border-right: none;
+  }
+  .drawer-header {
+    padding: calc(10px + env(safe-area-inset-top)) 14px 10px;
+  }
+  .drawer-body {
+    padding: 12px 14px calc(16px + env(safe-area-inset-bottom));
+  }
+
+  select,
+  input[type="number"],
+  .combo-input,
+  .button {
+    min-height: 44px;
+    font-size: 16px;
+  }
+
+  .top-bar {
+    display: grid;
+    grid-template-columns: auto auto auto auto minmax(0, 1fr);
+    gap: 8px;
+    align-items: center;
+    padding: 6px 0 8px;
+  }
+  .settings-toggle,
+  .theme-toggle,
+  .share-toggle,
+  .discord-link {
+    width: 40px;
+    height: 40px;
+    border-radius: 10px;
+  }
+  .top-title { font-size: 15px; }
+  .top-credits { display: none; }
+  .top-metrics {
+    grid-column: 1 / -1;
+    width: 100%;
+    margin-left: 0;
+    flex-wrap: nowrap;
+    justify-content: flex-start;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    -webkit-overflow-scrolling: touch;
+    padding: 0 2px 4px;
+    scrollbar-width: none;
+    scroll-snap-type: x proximity;
+  }
+  .top-metrics::-webkit-scrollbar { display: none; }
+  .top-metric {
+    flex: 0 0 auto;
+    min-height: 38px;
+    align-items: center;
+    padding: 5px 8px;
+    scroll-snap-align: start;
+  }
+  .top-metric.status-area { min-height: 38px; }
+  .tm-label { font-size: 9px; }
+  .tm-value { font-size: 15px; }
+  .status-pill {
+    min-height: 32px;
+    align-items: center;
+  }
+
+  .status-detail-row {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+    padding: 0 0 6px;
+  }
+  .summary-note { text-align: left; }
+
+  .schedule-shell { border-radius: var(--radius); }
+  .year-header { padding: 9px 10px; }
   .year-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .turn-card { min-height: 86px; }
+  .turn-inner { padding: 6px 7px; }
+  .turn-slot,
+  .turn-race-info,
+  .turn-stat-info { font-size: 10px; }
+  .turn-name-row {
+    min-height: 28px;
+    align-items: flex-start;
+  }
+  .turn-name {
+    font-size: 11px;
+    white-space: normal;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+  }
+  .edot { width: 8px; height: 8px; }
+
+  .race-tooltip.mobile-sheet {
+    left: 8px;
+    right: 8px;
+    top: auto;
+    bottom: max(8px, env(safe-area-inset-bottom));
+    min-width: 0;
+    max-width: none;
+    max-height: min(84dvh, calc(100dvh - 16px));
+    overflow-y: auto;
+    border-radius: var(--radius-lg);
+    transform: translateY(calc(100% + 16px));
+  }
+  .race-tooltip.mobile-sheet.visible { transform: translateY(0); }
+  .race-tooltip.mobile-sheet .race-tooltip-header {
+    align-items: flex-start;
+    padding: 10px 12px;
+    border-radius: calc(var(--radius-lg) - 2px) calc(var(--radius-lg) - 2px) 0 0;
+  }
+  .race-tooltip.mobile-sheet .race-tooltip-body { padding: 10px 12px 12px; }
+  .race-tooltip.mobile-sheet .tt-values { gap: 4px; }
+  .race-tooltip.mobile-sheet .tt-val-box { padding: 6px 4px; }
+  .race-tooltip.mobile-sheet .tt-val-num { font-size: 18px; }
+  .race-tooltip.mobile-sheet .tt-race-list {
+    max-height: min(42dvh, 320px);
+    margin: 0;
+  }
+  .race-tooltip.mobile-sheet .tt-race-item {
+    min-height: 44px;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: 4px 6px;
+    padding: 8px;
+  }
+  .race-tooltip.mobile-sheet .tt-ri-name {
+    flex: 1 1 calc(100% - 44px);
+    white-space: normal;
+    line-height: 1.2;
+  }
+  .race-tooltip.mobile-sheet .tt-ri-meta,
+  .race-tooltip.mobile-sheet .tt-ri-stats {
+    flex: 0 0 auto;
+  }
+  .race-tooltip.mobile-sheet .tt-ri-dots {
+    flex: 1 0 100%;
+    flex-wrap: wrap;
+  }
+  .race-tooltip.mobile-sheet .tt-btn-row {
+    flex-direction: column;
+    gap: 6px;
+  }
+  .race-tooltip.mobile-sheet .tt-btn {
+    width: 100%;
+    min-height: 44px;
+  }
+
+  .share-modal {
+    top: auto;
+    left: 8px;
+    right: 8px;
+    bottom: max(8px, env(safe-area-inset-bottom));
+    width: auto;
+    max-width: none;
+    transform: translateY(16px) scale(1);
+  }
+  .share-modal.open { transform: translateY(0) scale(1); }
+
+  .epithet-list {
+    grid-template-columns: 1fr;
+    padding: 8px;
+  }
 }
 
 /* ═══════════════════════════════════════════════════

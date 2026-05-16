@@ -71,6 +71,12 @@ const solverToggle = document.getElementById('solverToggle');
 let activeTooltipCard = null;
 let tooltipPinned = false;
 let solverEnabled = true;
+const mobileTooltipQuery = window.matchMedia('(max-width: 700px)');
+const coarsePointerQuery = window.matchMedia('(pointer: coarse)');
+
+function usesMobileTooltipSheet() {
+  return mobileTooltipQuery.matches || (coarsePointerQuery.matches && window.innerWidth <= 900);
+}
 
 /* ───── DARK MODE ───── */
 const themeToggle = document.getElementById('themeToggle');
@@ -199,6 +205,7 @@ function showTooltip(card, w) {
   if (activeTooltipCard === card) return;
   // Always fully dismiss old tooltip (handles stale refs from re-renders)
   tooltip.classList.remove('visible');
+  tooltip.classList.remove('mobile-sheet');
   activeTooltipCard = card;
 
   const isNoRace = w.selected === '[No race]';
@@ -212,6 +219,7 @@ function showTooltip(card, w) {
       <div class="race-tooltip-header">
         <span class="tt-name">${monthHalfLabel(w)}</span>
         <span class="tt-badge">${w.lock_value && w.lock_value !== 'Auto' ? 'Locked' : 'Auto'}</span>
+        <button type="button" class="tt-close" aria-label="Close race picker" title="Close">&times;</button>
       </div>
       <div class="race-tooltip-body">
         <div class="tt-no-race">No race scheduled</div>
@@ -225,6 +233,7 @@ function showTooltip(card, w) {
         <span class="tt-name">${w.selected}</span>
         ${lostBadge}
         <span class="tt-badge tt-grade-${gradeClass(w.grade)}">${w.grade || ''}</span>
+        <button type="button" class="tt-close" aria-label="Close race picker" title="Close">&times;</button>
       </div>
       <div class="race-tooltip-body">
         <div class="tt-meta-row">
@@ -292,6 +301,14 @@ function showTooltip(card, w) {
   }
 
   tooltip.innerHTML = html;
+
+  const closeBtn = tooltip.querySelector('.tt-close');
+  if (closeBtn) {
+    closeBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      hideTooltip();
+    });
+  }
 
   const selectWrap = tooltip.querySelector('#ttSelectWrap');
   if (selectWrap) {
@@ -399,6 +416,18 @@ function showTooltip(card, w) {
     selectWrap.appendChild(btnRow);
   }
 
+  tooltip.style.left = '';
+  tooltip.style.top = '';
+  tooltip.style.right = '';
+  tooltip.style.bottom = '';
+  tooltip.style.maxHeight = '';
+  tooltip.style.overflowY = '';
+
+  if (usesMobileTooltipSheet()) {
+    tooltip.classList.add('mobile-sheet', 'visible');
+    return;
+  }
+
   // Position: render off-screen first to measure actual size
   tooltip.style.left = '-9999px';
   tooltip.style.top = '0';
@@ -438,7 +467,14 @@ function showTooltip(card, w) {
 
 function hideTooltip() {
   tooltip.classList.remove('visible');
+  tooltip.classList.remove('mobile-sheet');
   tooltip.innerHTML = '';
+  tooltip.style.left = '';
+  tooltip.style.top = '';
+  tooltip.style.right = '';
+  tooltip.style.bottom = '';
+  tooltip.style.maxHeight = '';
+  tooltip.style.overflowY = '';
   activeTooltipCard = null;
   tooltipPinned = false;
 }
@@ -486,6 +522,13 @@ tooltip.addEventListener('mouseleave', () => {
 document.addEventListener('click', (e) => {
   if (!tooltip.contains(e.target) && !e.target.closest('.turn-card')) hideTooltip();
 });
+
+function hideTooltipOnViewportChange() {
+  if (activeTooltipCard) hideTooltip();
+}
+
+window.addEventListener('resize', hideTooltipOnViewportChange);
+window.addEventListener('orientationchange', hideTooltipOnViewportChange);
 
 /* ───── HELPERS ───── */
 function fillSelect(el, values, selected) {
