@@ -667,11 +667,11 @@ async function optimizeSchedule(settingsInput = null, fixedChoices = {}, lostInd
     objectiveVars.push({ name: `y_${e.name}`, coef: epithetObjectiveValue(e.name, settings, data) });
   }
   // Late Dec windows (last half of each year) don't cause conditioning penalty,
-  // so skip the 3-race penalty when the 3rd consecutive race lands there.
-  const LATE_DEC_WINDOWS = new Set([23, 47, 71]);
+  // so skip fatigue rules only when the streak-ending race lands there.
+  const YEAR_END_WINDOWS = new Set([23, 47, 71]);
   for (let idx = 0; idx < zVars.length; idx += 1) {
     const thirdWindow = idx + 2;
-    const coef = LATE_DEC_WINDOWS.has(thirdWindow) ? 0 : -settings.three_race_penalty_weight;
+    const coef = YEAR_END_WINDOWS.has(thirdWindow) ? 0 : -settings.three_race_penalty_weight;
     objectiveVars.push({ name: zVars[idx], coef });
   }
 
@@ -744,6 +744,8 @@ async function optimizeSchedule(settingsInput = null, fixedChoices = {}, lostInd
 
   // Max consecutive races hard cap.
   // Locked races count toward the cap — only constrain the remaining non-locked slots.
+  // Race fatigue cannot occur on Late Dec, but Late Dec still counts toward
+  // following windows that end in Early Jan.
   const maxConsec = Number(settings.max_consecutive_races || 0);
   if (maxConsec > 0) {
     const fixedRaceIndices = new Set(
@@ -752,6 +754,7 @@ async function optimizeSchedule(settingsInput = null, fixedChoices = {}, lostInd
         .map(([k]) => Number(k))
     );
     for (let start = 0; start < actionsByWindow.length - maxConsec; start += 1) {
+      if (YEAR_END_WINDOWS.has(start + maxConsec)) continue;
       // Count how many locked races fall in this sliding window
       let numForced = 0;
       const coeffs = [];
@@ -1072,7 +1075,7 @@ async function optimizeSchedule(settingsInput = null, fixedChoices = {}, lostInd
   const weightedRaceValueNet = weightedRaceValueGross - raceCostTotal - summerPenaltyTotal;
   const weightedEpithetValueTotal = settings.epithet_multiplier * settings.stat_weight * epithetStatPoints + settings.epithet_multiplier * settings.hint_weight * epithetHintNames.length;
   const triplePenaltyCount = zVars.reduce((sum, zName, idx) => {
-    if (LATE_DEC_WINDOWS.has(idx + 2)) return sum;
+    if (YEAR_END_WINDOWS.has(idx + 2)) return sum;
     return sum + ((solutionVars[zName] || 0) > 0.5 ? 1 : 0);
   }, 0);
   const triplePenaltyTotal = settings.three_race_penalty_weight * triplePenaltyCount;
