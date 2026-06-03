@@ -1254,6 +1254,15 @@ function formatPayload(result, manualLocks = {}, currentSelected = []) {
   };
 }
 
+export async function raceChoicesForSettings(settingsInput) {
+  const data = await loadData();
+  const settings = normalizeSettings(settingsInput);
+  return {
+    settings,
+    choicesByWindow: allDropdownChoices(data.windows, settings)
+  };
+}
+
 export async function initialPayload() {
   await loadData();
   const result = await optimizeSchedule(defaultSettings(), {});

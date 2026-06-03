@@ -1,4 +1,4 @@
-import { initialPayload, solveWithManualLocks, applyPreset, DEFAULT_SUMMER_BLOCKS, epithetRacePredicates, getAllEpithetNames } from './solver-browser.js';
+import { initialPayload, solveWithManualLocks, raceChoicesForSettings, applyPreset, DEFAULT_SUMMER_BLOCKS, epithetRacePredicates, getAllEpithetNames } from './solver-browser.js';
 
 let state = {
   settings: null,
@@ -1086,14 +1086,46 @@ function loadStateFromStorage() {
   } catch (e) { return null; }
 }
 
-function queueSolve(delay = 250) {
-  clearTimeout(autoSolveTimer);
-  if (!solverEnabled) {
-    // Solver disabled — apply manual locks directly to window state and re-render
+function showManualStatus() {
+  ids.statusText.textContent = 'Manual';
+  ids.statusPill.className = 'status-pill';
+  ids.statusNote.textContent = 'Solver disabled - pick races manually.';
+}
+
+async function refreshManualModeChoices() {
+  const seq = ++solveSequence;
+  showManualStatus();
+
+  try {
+    const payload = await raceChoicesForSettings(settingsFromUI());
+    if (seq !== solveSequence || solverEnabled) return;
+
+    state.settings = payload.settings;
+    for (const w of state.windows) {
+      const raceChoices = payload.choicesByWindow[w.index] || [];
+      w.race_choices = raceChoices;
+      w.choices = ['[No race]', ...raceChoices.map(r => r.name)];
+    }
+
     applyManualLocksToWindows();
     renderSchedule();
     renderSummary();
+    showManualStatus();
     saveStateToStorage();
+  } catch (err) {
+    if (seq !== solveSequence || solverEnabled) return;
+    console.error(err);
+    ids.statusText.textContent = 'ERROR';
+    ids.statusPill.className = 'status-pill bad';
+    ids.statusNote.textContent = `Race list refresh failed: ${err?.message || err}`;
+  }
+}
+
+function queueSolve(delay = 250) {
+  clearTimeout(autoSolveTimer);
+  if (!solverEnabled) {
+    // Solver disabled: refresh picker choices without optimizing the schedule.
+    autoSolveTimer = setTimeout(() => refreshManualModeChoices(), delay);
     return;
   }
   autoSolveTimer = setTimeout(() => postSolve(), delay);
@@ -1258,9 +1290,8 @@ function bindAutoSolveListeners() {
       ids.statusPill.className = 'status-pill ok';
       queueSolve(0);
     } else {
-      ids.statusText.textContent = 'Manual';
-      ids.statusPill.className = 'status-pill';
-      ids.statusNote.textContent = 'Solver disabled — pick races manually.';
+      solveSequence += 1;
+      showManualStatus();
     }
   });
 }
