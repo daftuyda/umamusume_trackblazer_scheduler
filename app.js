@@ -483,21 +483,20 @@ function pickRace(choice, w) {
   delete state.lost_locks[String(w.index)];
   if (choice === 'Auto') {
     delete state.manual_locks[String(w.index)];
-    state.freeze_before_index = latestPriorRaceLockIndex(w.index);
+    const remainingLocks = Object.keys(state.manual_locks).map(Number);
+    // Cap freeze at the unlocked index. Without this, a later manual lock
+    // (e.g. summer "[No race]" locks past w.index) pushes the cutoff past w.index,
+    // which pins currentSelected[w.index] — including the "[No race]" we just set —
+    // and prevents the solver from re-deciding the slot the user just unlocked.
+    state.freeze_before_index = remainingLocks.length
+      ? Math.min(Number(w.index), Math.max(...remainingLocks))
+      : null;
   } else {
     state.manual_locks[String(w.index)] = choice;
     state.freeze_before_index = Number(w.index);
   }
   hideTooltip();
   queueSolve(0);
-}
-
-function latestPriorRaceLockIndex(index) {
-  const cutoff = Number(index);
-  const priorRaceLocks = Object.entries(state.manual_locks)
-    .filter(([k, v]) => Number(k) < cutoff && v && v !== 'Auto' && v !== '[No race]')
-    .map(([k]) => Number(k));
-  return priorRaceLocks.length ? Math.max(...priorRaceLocks) : null;
 }
 
 function lockUpTo(index) {
@@ -1122,14 +1121,14 @@ async function refreshManualModeChoices() {
   }
 }
 
-function queueSolve(delay = 250, options = {}) {
+function queueSolve(delay = 250) {
   clearTimeout(autoSolveTimer);
   if (!solverEnabled) {
     // Solver disabled: refresh picker choices without optimizing the schedule.
     autoSolveTimer = setTimeout(() => refreshManualModeChoices(), delay);
     return;
   }
-  autoSolveTimer = setTimeout(() => postSolve(options), delay);
+  autoSolveTimer = setTimeout(() => postSolve(), delay);
 }
 
 function applyManualLocksToWindows() {
@@ -1171,15 +1170,14 @@ function applyManualLocksToWindows() {
   }
 }
 
-async function postSolve(options = {}) {
+async function postSolve() {
   const seq = ++solveSequence;
   ids.statusText.textContent = 'UPDATING';
   ids.statusPill.className = 'status-pill warn';
   ids.statusNote.textContent = 'Recomputing\u2026';
   try {
-    const currentSelected = options.fromLocksOnly ? [] : state.current_selected;
     const payload = await solveWithManualLocks(
-      settingsFromUI(), currentSelected, state.manual_locks, state.freeze_before_index, state.lost_locks
+      settingsFromUI(), state.current_selected, state.manual_locks, state.freeze_before_index, state.lost_locks
     );
     if (seq !== solveSequence) return;
     applyPayload(payload);
@@ -1271,8 +1269,7 @@ function bindAutoSolveListeners() {
   ids.rebuildBtn.addEventListener('click', () => {
     solverEnabled = true;
     solverToggle.checked = true;
-    state.freeze_before_index = null;
-    queueSolve(0, { fromLocksOnly: true });
+    queueSolve(0);
   });
   ids.clearLocksBtn.addEventListener('click', () => {
     // Reset to only the default summer training blocks
